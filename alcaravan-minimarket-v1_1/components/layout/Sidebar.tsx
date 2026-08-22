@@ -20,11 +20,12 @@ const navItems = [
   { href: '/gastos', icon: '💳', label: 'Gastos', phase: 2 },
   { href: '/reportes', icon: '📈', label: 'Reportes' },
   { href: '/ai', icon: '🤖', label: 'Alcaraván AI', phase: 5 },
+  { href: '/usuarios', icon: '👤', label: 'Usuarios' },
   { href: '/configuracion', icon: '⚙️', label: 'Configuración' },
 ]
 
-// Módulos activos en Fase 1
-const activePhase1 = ['/', '/pos', '/productos', '/inventario', '/clientes', '/caja', '/reportes', '/configuracion']
+// Todos los módulos activos
+const activePhase1 = ['/', '/pos', '/productos', '/inventario', '/clientes', '/caja', '/reportes', '/configuracion', '/compras', '/proveedores', '/gastos', '/cafeteria', '/produccion', '/domicilios', '/promociones', '/usuarios', '/ai']
 
 interface SidebarProps {
   onClose?: () => void

@@ -25,6 +25,10 @@ function ProductSearch({
       return
     }
 
+    // Detectar si es un código de barras (solo números, > 6 dígitos): buscar inmediatamente
+    const isBarcode = /^\d{6,}$/.test(query.trim())
+    const delay = isBarcode ? 0 : 250
+
     const timer = setTimeout(async () => {
       setLoading(true)
       const { data } = await supabase
@@ -35,9 +39,17 @@ function ProductSearch({
         .order('name')
         .limit(12)
 
-      setResults(data ?? [])
+      const results = data ?? []
+      setResults(results)
       setLoading(false)
-    }, 250)
+
+      // Si es código de barras y hay exactamente un resultado: agregar automáticamente
+      if (isBarcode && results.length === 1) {
+        onSelect(results[0])
+        setQuery('')
+        setResults([])
+      }
+    }, delay)
 
     return () => clearTimeout(timer)
   }, [query])
@@ -51,7 +63,14 @@ function ProductSearch({
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Buscar producto, código de barras..."
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && results.length > 0) {
+              onSelect(results[0])
+              setQuery('')
+              setResults([])
+            }
+          }}
+          placeholder="Buscar producto o escanear código de barras..."
           className="flex-1 outline-none text-stone-800 placeholder:text-stone-400 text-sm"
           autoFocus
         />
