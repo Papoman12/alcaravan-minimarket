@@ -1,0 +1,94 @@
+@import "tailwindcss";
+
+:root {
+  /* Paleta Alcaraván — Café y Verde */
+  --color-primary: #6F4E37;       /* café oscuro */
+  --color-primary-light: #A0785A;
+  --color-primary-dark: #4A3323;
+  --color-accent: #2D6A4F;        /* verde bosque */
+  --color-accent-light: #52B788;
+  --color-accent-dark: #1B4332;
+  --color-warm: #D4A96A;          /* crema dorada */
+  --color-warm-light: #F4E4C1;
+  --color-bg: #FAFAF8;
+  --color-surface: #FFFFFF;
+  --color-border: #E8E0D5;
+  --color-text: #1A1107;
+  --color-text-muted: #6B5B45;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px 0 rgb(111 78 55 / 0.08);
+  --shadow-md: 0 4px 6px -1px rgb(111 78 55 / 0.10), 0 2px 4px -2px rgb(111 78 55 / 0.10);
+  --shadow-lg: 0 10px 15px -3px rgb(111 78 55 / 0.10), 0 4px 6px -4px rgb(111 78 55 / 0.10);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-geist-sans, system-ui, -apple-system, sans-serif);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar personalizada */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-primary-light);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-primary);
+}
+
+/* Animaciones de entrada */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out;
+}
+
+.animate-slide-in {
+  animation: slideIn 0.2s ease-out;
+}
+
+/* POS mode — pantalla completa táctil */
+.pos-grid-product {
+  transition: all 0.15s ease;
+}
+.pos-grid-product:active {
+  transform: scale(0.96);
+}
+
+/* Print styles */
+@media print {
+  .no-print { display: none !important; }
+  .print-only { display: block !important; }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
