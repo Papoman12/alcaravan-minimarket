@@ -6,13 +6,13 @@ import { createClient } from '@/lib/supabase/client'
 export const dynamic = 'force-dynamic'
 
 export default function ForgotPasswordPage() {
-  const supabase = createClient()
   const [email, setEmail] = useState('')
   const [sent, setSent] = useState(false)
   const [error, setError] = useState('')
 
   async function handleReset() {
     setError('')
+    const supabase = createClient()
     const { error: err } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/update-password`,
     })
