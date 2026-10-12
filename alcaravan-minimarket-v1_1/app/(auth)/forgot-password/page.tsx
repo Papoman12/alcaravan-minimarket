@@ -3,72 +3,74 @@
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
+export const dynamic = 'force-dynamic'
+
 export default function ForgotPasswordPage() {
   const supabase = createClient()
   const [email, setEmail] = useState('')
   const [sent, setSent] = useState(false)
   const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setLoading(true)
+  async function handleReset() {
     setError('')
-
-    const redirectTo = `${window.location.origin}/reset-password`
-
-    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo })
-
-    if (error) {
-      setError('No se pudo enviar el correo. Verifica el email.')
+    const { error: err } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/update-password`,
+    })
+    if (err) {
+      setError(err.message)
     } else {
       setSent(true)
     }
-    setLoading(false)
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-stone-800 via-amber-900 to-stone-900 flex items-center justify-center p-4">
-      <div className="bg-white rounded-3xl shadow-2xl p-8 w-full max-w-md">
-        <div className="text-center mb-6">
-          <p className="text-3xl mb-2">☕</p>
-          <h1 className="text-xl font-bold text-stone-800">Recuperar contraseña</h1>
-          <p className="text-stone-500 text-sm mt-1">ALCARAVÁN MINIMARKET CAFÉ</p>
-        </div>
+    <div className="min-h-screen flex items-center justify-center bg-stone-50 p-4">
+      <div className="bg-white rounded-2xl shadow-lg p-8 w-full max-w-sm">
+        <h1 className="text-2xl font-bold text-stone-800 mb-1">Recuperar contraseña</h1>
+        <p className="text-sm text-stone-500 mb-6">
+          Ingresa tu correo y te enviaremos un enlace para restablecer tu contraseña.
+        </p>
 
         {sent ? (
-          <div className="text-center">
-            <p className="text-4xl mb-3">📧</p>
-            <p className="font-semibold text-stone-800 mb-2">¡Correo enviado!</p>
-            <p className="text-stone-500 text-sm">Revisa tu bandeja de entrada en <strong>{email}</strong> y sigue el enlace para crear una nueva contraseña.</p>
-            <a href="/login" className="block mt-6 text-amber-700 hover:underline text-sm">← Volver al login</a>
+          <div className="bg-emerald-50 text-emerald-700 rounded-xl px-4 py-3 text-sm">
+            ✅ Revisa tu correo — te enviamos el enlace de recuperación.
           </div>
         ) : (
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-stone-700 mb-1">Correo electrónico</label>
+          <>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-stone-700 mb-1">
+                Correo electrónico
+              </label>
               <input
                 type="email"
                 value={email}
-                onChange={e => setEmail(e.target.value)}
-                required
-                placeholder="tu@email.com"
-                className="w-full px-4 py-3 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500"
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="tucorreo@ejemplo.com"
+                className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700"
               />
             </div>
 
-            {error && <p className="text-red-600 text-sm">{error}</p>}
+            {error && (
+              <div className="bg-red-50 text-red-600 rounded-xl px-4 py-3 text-sm mb-4">
+                {error}
+              </div>
+            )}
 
             <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-3 bg-amber-700 hover:bg-amber-800 text-white font-semibold rounded-xl transition-colors disabled:opacity-50"
+              onClick={handleReset}
+              disabled={!email}
+              className="w-full py-2.5 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 disabled:bg-stone-300 transition-colors"
             >
-              {loading ? 'Enviando...' : 'Enviar enlace de recuperación'}
+              Enviar enlace
             </button>
 
-            <a href="/login" className="block text-center text-stone-500 hover:text-stone-700 text-sm">← Volver al login</a>
-          </form>
+            <a
+              href="/login"
+              className="block text-center text-sm text-stone-500 hover:text-stone-700 mt-4"
+            >
+              ← Volver al inicio de sesión
+            </a>
+          </>
         )}
       </div>
     </div>
