@@ -7,14 +7,14 @@ const BRANCH_ID = '56916f1b-17dc-4c3d-8e65-a7d2a6554891'
 
 interface Order {
   id: string
-  order_number?: string
+  order_number: string
   order_type: string
   table_number?: string
   customer_name?: string
   status: string
   notes?: string
   created_at: string
-  items?: OrderItem[]
+  order_items?: OrderItem[]
 }
 
 interface OrderItem {
@@ -23,7 +23,6 @@ interface OrderItem {
   quantity: number
   unit_price: number
   notes?: string
-  status?: string
 }
 
 interface Product {
@@ -48,18 +47,10 @@ export default function CafeteriaPage() {
   const [saving, setSaving] = useState(false)
   const [filterStatus, setFilterStatus] = useState('active')
   const [error, setError] = useState('')
-  const [form, setForm] = useState({
-    order_type: 'dine_in',
-    table_number: '',
-    customer_name: '',
-    notes: '',
-  })
+  const [form, setForm] = useState({ order_type: 'dine_in', table_number: '', customer_name: '', notes: '' })
   const [items, setItems] = useState<{ product_id: string; product_name: string; quantity: number; unit_price: number; notes: string }[]>([])
 
-  useEffect(() => {
-    load()
-    loadProducts()
-  }, [])
+  useEffect(() => { load(); loadProducts() }, [])
 
   async function load() {
     setLoading(true)
@@ -95,10 +86,7 @@ export default function CafeteriaPage() {
     }
   }
 
-  function removeItem(productId: string) {
-    setItems(items.filter(i => i.product_id !== productId))
-  }
-
+  function removeItem(productId: string) { setItems(items.filter(i => i.product_id !== productId)) }
   function updateQty(productId: string, qty: number) {
     if (qty <= 0) { removeItem(productId); return }
     setItems(items.map(i => i.product_id === productId ? { ...i, quantity: qty } : i))
@@ -109,19 +97,18 @@ export default function CafeteriaPage() {
     setSaving(true)
     setError('')
     const supabase = createClient()
-
+    const orderNum = 'CAF-' + Date.now().toString().slice(-8)
     const orderPayload = {
       branch_id: BRANCH_ID,
+      order_number: orderNum,
       order_type: form.order_type,
       table_number: form.table_number.trim() || null,
       customer_name: form.customer_name.trim() || null,
       status: 'pending',
       notes: form.notes.trim() || null,
     }
-
     const { data: orderData, error: orderErr } = await supabase.from('orders').insert(orderPayload).select().single()
     if (orderErr) { setError('Error al crear pedido: ' + orderErr.message); setSaving(false); return }
-
     const itemsPayload = items.map(i => ({
       order_id: orderData.id,
       product_id: i.product_id,
@@ -131,10 +118,8 @@ export default function CafeteriaPage() {
       notes: i.notes.trim() || null,
       status: 'pending',
     }))
-
     const { error: itemsErr } = await supabase.from('order_items').insert(itemsPayload)
     if (itemsErr) { setError('Error al guardar items: ' + itemsErr.message); setSaving(false); return }
-
     setSaving(false)
     setShowModal(false)
     load()
@@ -147,9 +132,7 @@ export default function CafeteriaPage() {
   }
 
   const activeOrders = orders.filter(o => !['delivered', 'cancelled'].includes(o.status))
-  const allOrders = orders
-
-  const displayed = filterStatus === 'active' ? activeOrders : allOrders
+  const displayed = filterStatus === 'active' ? activeOrders : orders
   const statusInfo = (s: string) => STATUS_OPTIONS.find(x => x.value === s) ?? { label: s, color: 'bg-stone-100 text-stone-600' }
   const total = items.reduce((s, i) => s + i.quantity * i.unit_price, 0)
   const fmt = (n: number) => '$' + n.toLocaleString('es-CO')
@@ -183,8 +166,8 @@ export default function CafeteriaPage() {
         <div className="grid gap-3">
           {displayed.map(o => {
             const si = statusInfo(o.status)
-            const orderItems = (o as any).order_items ?? []
-            const orderTotal = orderItems.reduce((s: number, i: any) => s + (i.quantity * i.unit_price), 0)
+            const orderItems = o.order_items ?? []
+            const orderTotal = orderItems.reduce((s, i) => s + (i.quantity * i.unit_price), 0)
             return (
               <div key={o.id} className="bg-white rounded-2xl border border-stone-200 p-4">
                 <div className="flex items-start gap-3">
@@ -193,14 +176,14 @@ export default function CafeteriaPage() {
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      {o.table_number && <p className="font-semibold text-stone-800">Mesa {o.table_number}</p>}
-                      {o.customer_name && <p className="font-semibold text-stone-800">{o.customer_name}</p>}
-                      {!o.table_number && !o.customer_name && <p className="font-semibold text-stone-800">Pedido #{o.id.slice(-6).toUpperCase()}</p>}
+                      <p className="font-semibold text-stone-800">
+                        {o.table_number ? `Mesa ${o.table_number}` : o.customer_name ?? o.order_number}
+                      </p>
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${si.color}`}>{si.label}</span>
                     </div>
                     {orderItems.length > 0 && (
                       <div className="mt-1 space-y-0.5">
-                        {orderItems.map((item: any) => (
+                        {orderItems.map(item => (
                           <p key={item.id} className="text-sm text-stone-600">× {item.quantity} {item.product_name} — {fmt(item.unit_price * item.quantity)}</p>
                         ))}
                       </div>
@@ -213,13 +196,9 @@ export default function CafeteriaPage() {
                   <div className="flex gap-2 mt-3 flex-wrap">
                     {STATUS_OPTIONS.filter(s => s.value !== o.status && s.value !== 'cancelled').map(s => (
                       <button key={s.value} onClick={() => updateStatus(o.id, s.value)}
-                        className={`px-3 py-1 text-xs rounded-lg font-medium ${s.color}`}>
-                        → {s.label}
-                      </button>
+                        className={`px-3 py-1 text-xs rounded-lg font-medium ${s.color}`}>→ {s.label}</button>
                     ))}
-                    <button onClick={() => updateStatus(o.id, 'cancelled')} className="px-3 py-1 text-xs rounded-lg font-medium bg-red-50 text-red-600">
-                      Cancelar
-                    </button>
+                    <button onClick={() => updateStatus(o.id, 'cancelled')} className="px-3 py-1 text-xs rounded-lg font-medium bg-red-50 text-red-600">Cancelar</button>
                   </div>
                 )}
               </div>
