@@ -2,91 +2,151 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { formatCurrency } from '@/lib/utils'
+
+const BRANCH_ID = '56916f1b-17dc-4c3d-8e65-a7d2a6554891'
 
 interface Delivery {
   id: string
-  delivery_number: string
   customer_name: string
-  address: string
-  phone?: string
-  total: number
+  customer_phone?: string
+  delivery_address: string
+  delivery_reference?: string
+  city?: string
+  delivery_fee?: number
+  payment_method?: string
   status: string
   notes?: string
   created_at: string
 }
 
 const STATUS_OPTIONS = [
-  { key: 'pending', label: 'Pendiente', color: 'bg-yellow-100 text-yellow-700', icon: '⏳' },
-  { key: 'confirmed', label: 'Confirmado', color: 'bg-blue-100 text-blue-700', icon: '✅' },
-  { key: 'preparing', label: 'Preparando', color: 'bg-orange-100 text-orange-700', icon: '👨‍🍳' },
-  { key: 'on_way', label: 'En camino', color: 'bg-purple-100 text-purple-700', icon: '🚚' },
-  { key: 'delivered', label: 'Entregado', color: 'bg-emerald-100 text-emerald-700', icon: '🏁' },
-  { key: 'cancelled', label: 'Cancelado', color: 'bg-red-100 text-red-600', icon: '❌' },
+  { value: 'pending', label: '⏳ Pendiente', color: 'bg-yellow-100 text-yellow-700' },
+  { value: 'assigned', label: '👤 Asignado', color: 'bg-blue-100 text-blue-700' },
+  { value: 'picked_up', label: '🛵 En camino', color: 'bg-orange-100 text-orange-700' },
+  { value: 'delivered', label: '✅ Entregado', color: 'bg-emerald-100 text-emerald-700' },
+  { value: 'cancelled', label: '❌ Cancelado', color: 'bg-red-100 text-red-700' },
 ]
+
+const PAYMENT_METHODS = ['Efectivo', 'Transferencia', 'Nequi', 'Daviplata', 'Tarjeta']
 
 export default function DomiciliosPage() {
   const [deliveries, setDeliveries] = useState<Delivery[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [activeFilter, setActiveFilter] = useState('all')
-  const [form, setForm] = useState({ customer_name: '', address: '', phone: '', total: '', notes: '' })
-  const supabase = createClient()
+  const [editing, setEditing] = useState<Delivery | null>(null)
+  const [filterStatus, setFilterStatus] = useState('all')
+  const [error, setError] = useState('')
+  const [form, setForm] = useState({
+    customer_name: '',
+    customer_phone: '',
+    delivery_address: '',
+    delivery_reference: '',
+    city: '',
+    delivery_fee: '',
+    payment_method: 'Efectivo',
+    notes: '',
+  })
 
   useEffect(() => { load() }, [])
 
   async function load() {
     setLoading(true)
-    const { data } = await supabase.from('deliveries').select('*').order('created_at', { ascending: false }).limit(100)
+    const supabase = createClient()
+    const { data } = await supabase
+      .from('deliveries')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(100)
     setDeliveries(data ?? [])
     setLoading(false)
   }
 
-  async function handleSave() {
-    if (!form.customer_name || !form.address) return
-    setSaving(true)
-    const num = 'D' + Date.now().toString().slice(-8)
-    await supabase.from('deliveries').insert({
-      delivery_number: num,
-      customer_name: form.customer_name,
-      address: form.address,
-      phone: form.phone || null,
-      total: parseFloat(form.total) || 0,
-      notes: form.notes || null,
-      status: 'pending',
+  function openNew() {
+    setEditing(null)
+    setError('')
+    setForm({ customer_name: '', customer_phone: '', delivery_address: '', delivery_reference: '', city: '', delivery_fee: '', payment_method: 'Efectivo', notes: '' })
+    setShowModal(true)
+  }
+
+  function openEdit(d: Delivery) {
+    setEditing(d)
+    setError('')
+    setForm({
+      customer_name: d.customer_name,
+      customer_phone: d.customer_phone ?? '',
+      delivery_address: d.delivery_address,
+      delivery_reference: d.delivery_reference ?? '',
+      city: d.city ?? '',
+      delivery_fee: d.delivery_fee?.toString() ?? '',
+      payment_method: d.payment_method ?? 'Efectivo',
+      notes: d.notes ?? '',
     })
+    setShowModal(true)
+  }
+
+  async function handleSave() {
+    if (!form.customer_name || !form.delivery_address) {
+      setError('Nombre del cliente y dirección son obligatorios')
+      return
+    }
+    setSaving(true)
+    setError('')
+    const supabase = createClient()
+    const payload = {
+      branch_id: BRANCH_ID,
+      customer_name: form.customer_name.trim(),
+      customer_phone: form.customer_phone.trim() || null,
+      delivery_address: form.delivery_address.trim(),
+      delivery_reference: form.delivery_reference.trim() || null,
+      city: form.city.trim() || null,
+      delivery_fee: form.delivery_fee ? parseFloat(form.delivery_fee) : 0,
+      payment_method: form.payment_method,
+      status: 'pending',
+      notes: form.notes.trim() || null,
+    }
+    if (editing) {
+      const { error: err } = await supabase.from('deliveries').update(payload).eq('id', editing.id)
+      if (err) { setError('Error al actualizar: ' + err.message); setSaving(false); return }
+    } else {
+      const { error: err } = await supabase.from('deliveries').insert(payload)
+      if (err) { setError('Error al guardar: ' + err.message); setSaving(false); return }
+    }
     setSaving(false)
     setShowModal(false)
-    setForm({ customer_name: '', address: '', phone: '', total: '', notes: '' })
     load()
   }
 
   async function updateStatus(id: string, status: string) {
+    const supabase = createClient()
     await supabase.from('deliveries').update({ status }).eq('id', id)
     load()
   }
 
-  const filtered = activeFilter === 'all' ? deliveries : deliveries.filter(d => d.status === activeFilter)
-  const getStatus = (key: string) => STATUS_OPTIONS.find(s => s.key === key) ?? { label: key, color: 'bg-stone-100 text-stone-600', icon: '📦' }
+  const filtered = filterStatus === 'all' ? deliveries : deliveries.filter(d => d.status === filterStatus)
+  const statusInfo = (s: string) => STATUS_OPTIONS.find(x => x.value === s) ?? { label: s, color: 'bg-stone-100 text-stone-600' }
+  const fmt = (n?: number) => n != null ? '$' + n.toLocaleString('es-CO') : '—'
 
   return (
-    <div className="p-4 max-w-5xl mx-auto">
+    <div className="p-4 max-w-4xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-stone-800">Domicilios</h1>
-          <p className="text-stone-500 text-sm mt-0.5">{deliveries.filter(d => ['pending','confirmed','preparing','on_way'].includes(d.status)).length} activos</p>
+          <p className="text-stone-500 text-sm mt-0.5">{deliveries.filter(d => d.status === 'pending').length} pendientes · {deliveries.length} hoy</p>
         </div>
-        <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 transition-colors shadow-lg shadow-amber-700/20">
+        <button onClick={openNew} className="px-4 py-2 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 transition-colors">
           + Nuevo Domicilio
         </button>
       </div>
 
-      <div className="flex gap-2 overflow-x-auto pb-2 mb-4">
-        <button onClick={() => setActiveFilter('all')} className={`flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${activeFilter === 'all' ? 'bg-amber-700 text-white' : 'bg-white border border-stone-200 text-stone-600'}`}>Todos</button>
+      <div className="flex gap-2 mb-4 flex-wrap">
+        <button onClick={() => setFilterStatus('all')} className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-colors ${filterStatus === 'all' ? 'bg-amber-700 text-white' : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-50'}`}>
+          Todos ({deliveries.length})
+        </button>
         {STATUS_OPTIONS.map(s => (
-          <button key={s.key} onClick={() => setActiveFilter(s.key)} className={`flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${activeFilter === s.key ? 'bg-amber-700 text-white' : 'bg-white border border-stone-200 text-stone-600'}`}>
-            {s.icon} {s.label}
+          <button key={s.value} onClick={() => setFilterStatus(s.value)}
+            className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-colors ${filterStatus === s.value ? 'bg-amber-700 text-white' : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-50'}`}>
+            {s.label} ({deliveries.filter(d => d.status === s.value).length})
           </button>
         ))}
       </div>
@@ -94,37 +154,44 @@ export default function DomiciliosPage() {
       {loading ? (
         <div className="flex justify-center py-16"><div className="w-8 h-8 border-4 border-amber-700 border-t-transparent rounded-full animate-spin" /></div>
       ) : filtered.length === 0 ? (
-        <div className="text-center py-16"><p className="text-5xl mb-3">🚚</p><p className="text-stone-500">No hay domicilios</p></div>
+        <div className="text-center py-16"><p className="text-5xl mb-3">🛵</p><p className="text-stone-500">No hay domicilios</p></div>
       ) : (
         <div className="grid gap-3">
-          {filtered.map((d) => {
-            const st = getStatus(d.status)
+          {filtered.map(d => {
+            const si = statusInfo(d.status)
             return (
               <div key={d.id} className="bg-white rounded-2xl border border-stone-200 p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-mono text-xs text-stone-400">{d.delivery_number}</span>
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${st.color}`}>{st.icon} {st.label}</span>
-                    </div>
-                    <p className="font-semibold text-stone-800">{d.customer_name}</p>
-                    <p className="text-sm text-stone-500">📍 {d.address}</p>
-                    {d.phone && <p className="text-sm text-stone-500">📞 {d.phone}</p>}
-                    {d.notes && <p className="text-sm text-stone-400 mt-1">{d.notes}</p>}
+                <div className="flex items-start gap-4">
+                  <div className="w-12 h-12 bg-orange-50 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <span className="text-2xl">🛵</span>
                   </div>
-                  <div className="text-right flex-shrink-0">
-                    <p className="font-bold text-amber-700">{formatCurrency(d.total)}</p>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-semibold text-stone-800">{d.customer_name}</p>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${si.color}`}>{si.label}</span>
+                    </div>
+                    <p className="text-sm text-stone-600 mt-0.5">📍 {d.delivery_address}{d.city ? `, ${d.city}` : ''}</p>
+                    {d.delivery_reference && <p className="text-xs text-stone-400">{d.delivery_reference}</p>}
+                    <div className="flex gap-3 mt-1 flex-wrap">
+                      {d.customer_phone && <span className="text-sm text-stone-500">📞 {d.customer_phone}</span>}
+                      {d.delivery_fee != null && d.delivery_fee > 0 && <span className="text-sm font-medium text-amber-700">Flete: {fmt(d.delivery_fee)}</span>}
+                      {d.payment_method && <span className="text-sm text-stone-500">{d.payment_method}</span>}
+                    </div>
+                  </div>
+                  <div className="flex gap-2 flex-shrink-0">
+                    <button onClick={() => openEdit(d)} className="px-3 py-1.5 text-sm border border-stone-200 rounded-lg text-stone-600 hover:bg-stone-50">Editar</button>
                   </div>
                 </div>
-                {!['delivered','cancelled'].includes(d.status) && (
-                  <div className="flex gap-2 mt-3 pt-3 border-t border-stone-100">
-                    {STATUS_OPTIONS.filter(s => !['delivered','cancelled'].includes(s.key) && s.key !== d.status).slice(0, 3).map(s => (
-                      <button key={s.key} onClick={() => updateStatus(d.id, s.key)} className="text-xs px-3 py-1.5 bg-stone-50 border border-stone-200 rounded-lg text-stone-600 hover:bg-stone-100 transition-colors">
-                        {s.icon} {s.label}
+                {d.status !== 'delivered' && d.status !== 'cancelled' && (
+                  <div className="flex gap-2 mt-3 flex-wrap">
+                    {STATUS_OPTIONS.filter(s => s.value !== d.status && s.value !== 'cancelled').map(s => (
+                      <button key={s.value} onClick={() => updateStatus(d.id, s.value)}
+                        className={`px-3 py-1 text-xs rounded-lg font-medium ${s.color}`}>
+                        → {s.label}
                       </button>
                     ))}
-                    <button onClick={() => updateStatus(d.id, 'delivered')} className="text-xs px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-700 hover:bg-emerald-100 transition-colors ml-auto">
-                      🏁 Entregado
+                    <button onClick={() => updateStatus(d.id, 'cancelled')} className="px-3 py-1 text-xs rounded-lg font-medium bg-red-50 text-red-600">
+                      Cancelar
                     </button>
                   </div>
                 )}
@@ -136,26 +203,63 @@ export default function DomiciliosPage() {
 
       {showModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
-            <h3 className="text-lg font-bold text-stone-800 mb-4">Nuevo Domicilio</h3>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-lg font-bold text-stone-800 mb-4">{editing ? 'Editar Domicilio' : 'Nuevo Domicilio'}</h3>
+            {error && <div className="bg-red-50 text-red-700 rounded-xl px-3 py-2 text-sm mb-4">{error}</div>}
             <div className="space-y-3">
-              {[
-                { key: 'customer_name', label: 'Cliente *', placeholder: 'Nombre del cliente' },
-                { key: 'address', label: 'Dirección *', placeholder: 'Calle 123 # 45-67' },
-                { key: 'phone', label: 'Teléfono', placeholder: '300 000 0000' },
-                { key: 'total', label: 'Total ($)', placeholder: '0', type: 'number' },
-                { key: 'notes', label: 'Notas', placeholder: 'Instrucciones de entrega...' },
-              ].map(({ key, label, placeholder, type }) => (
-                <div key={key}>
-                  <label className="block text-sm font-medium text-stone-700 mb-1">{label}</label>
-                  <input type={type ?? 'text'} value={(form as any)[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} placeholder={placeholder} className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-stone-700 mb-1">Nombre cliente *</label>
+                  <input type="text" value={form.customer_name} onChange={e => setForm({ ...form, customer_name: e.target.value })} placeholder="Nombre"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
                 </div>
-              ))}
+                <div>
+                  <label className="block text-sm font-medium text-stone-700 mb-1">Teléfono</label>
+                  <input type="tel" value={form.customer_phone} onChange={e => setForm({ ...form, customer_phone: e.target.value })} placeholder="300 000 0000"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-1">Dirección *</label>
+                <input type="text" value={form.delivery_address} onChange={e => setForm({ ...form, delivery_address: e.target.value })} placeholder="Calle 1 # 2-3"
+                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-stone-700 mb-1">Referencia</label>
+                  <input type="text" value={form.delivery_reference} onChange={e => setForm({ ...form, delivery_reference: e.target.value })} placeholder="Casa amarilla, 2do piso..."
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-stone-700 mb-1">Ciudad</label>
+                  <input type="text" value={form.city} onChange={e => setForm({ ...form, city: e.target.value })} placeholder="Ciudad"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-stone-700 mb-1">Costo domicilio</label>
+                  <input type="number" value={form.delivery_fee} onChange={e => setForm({ ...form, delivery_fee: e.target.value })} placeholder="0"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-stone-700 mb-1">Pago</label>
+                  <select value={form.payment_method} onChange={e => setForm({ ...form, payment_method: e.target.value })}
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700">
+                    {PAYMENT_METHODS.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-1">Notas</label>
+                <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} rows={2} placeholder="Instrucciones especiales..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700 resize-none" />
+              </div>
             </div>
             <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowModal(false)} className="flex-1 py-2.5 border border-stone-200 rounded-xl text-stone-600 hover:bg-stone-50 transition-colors">Cancelar</button>
-              <button onClick={handleSave} disabled={saving || !form.customer_name || !form.address} className="flex-1 py-2.5 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 disabled:bg-stone-300 transition-colors">
-                {saving ? 'Guardando...' : 'Guardar'}
+              <button onClick={() => setShowModal(false)} className="flex-1 py-2.5 border border-stone-200 rounded-xl text-stone-600 hover:bg-stone-50">Cancelar</button>
+              <button onClick={handleSave} disabled={saving} className="flex-1 py-2.5 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 disabled:bg-stone-300">
+                {saving ? 'Guardando...' : editing ? 'Actualizar' : 'Guardar'}
               </button>
             </div>
           </div>
