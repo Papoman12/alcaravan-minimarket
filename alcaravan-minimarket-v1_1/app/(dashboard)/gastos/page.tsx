@@ -2,64 +2,113 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { formatCurrency, formatDate } from '@/lib/utils'
+
+const BRANCH_ID = '56916f1b-17dc-4c3d-8e65-a7d2a6554891'
 
 interface Expense {
   id: string
+  date: string
+  category: string
   description: string
   amount: number
-  category: string
   payment_method: string
-  expense_date: string
   notes?: string
 }
 
-const CATEGORIES = ['Servicios', 'Arriendo', 'Nómina', 'Suministros', 'Mantenimiento', 'Transporte', 'Publicidad', 'Impuestos', 'Otro']
+const CATEGORIES = ['Arriendo', 'Servicios públicos', 'Nómina', 'Proveedores', 'Mantenimiento', 'Marketing', 'Transporte', 'Otros']
+const PAYMENT_METHODS = ['Efectivo', 'Transferencia', 'Tarjeta débito', 'Tarjeta crédito', 'Nequi', 'Daviplata']
 
 export default function GastosPage() {
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [form, setForm] = useState({ description: '', amount: '', category: 'Suministros', payment_method: 'cash', expense_date: new Date().toISOString().split('T')[0], notes: '' })
-  const supabase = createClient()
+  const [editing, setEditing] = useState<Expense | null>(null)
+  const [error, setError] = useState('')
+  const [form, setForm] = useState({
+    date: new Date().toISOString().split('T')[0],
+    category: '',
+    description: '',
+    amount: '',
+    payment_method: 'Efectivo',
+    notes: '',
+  })
 
   useEffect(() => { load() }, [])
 
   async function load() {
     setLoading(true)
-    const { data } = await supabase.from('expenses').select('*').order('expense_date', { ascending: false }).limit(100)
+    const supabase = createClient()
+    const { data } = await supabase
+      .from('expenses')
+      .select('*')
+      .order('date', { ascending: false })
+      .limit(100)
     setExpenses(data ?? [])
     setLoading(false)
   }
 
+  function openNew() {
+    setEditing(null)
+    setError('')
+    setForm({ date: new Date().toISOString().split('T')[0], category: '', description: '', amount: '', payment_method: 'Efectivo', notes: '' })
+    setShowModal(true)
+  }
+
+  function openEdit(e: Expense) {
+    setEditing(e)
+    setError('')
+    setForm({ date: e.date, category: e.category, description: e.description, amount: e.amount.toString(), payment_method: e.payment_method, notes: e.notes ?? '' })
+    setShowModal(true)
+  }
+
   async function handleSave() {
-    if (!form.description || !form.amount) return
+    if (!form.date || !form.category || !form.amount) {
+      setError('Fecha, categoría y monto son obligatorios')
+      return
+    }
     setSaving(true)
-    await supabase.from('expenses').insert({
-      description: form.description,
-      amount: parseFloat(form.amount),
+    setError('')
+    const supabase = createClient()
+    const payload = {
+      branch_id: BRANCH_ID,
+      date: form.date,
       category: form.category,
+      description: form.description.trim() || null,
+      amount: parseFloat(form.amount),
       payment_method: form.payment_method,
-      expense_date: form.expense_date,
-      notes: form.notes || null,
-    })
+      notes: form.notes.trim() || null,
+    }
+    if (editing) {
+      const { error: err } = await supabase.from('expenses').update(payload).eq('id', editing.id)
+      if (err) { setError('Error al actualizar: ' + err.message); setSaving(false); return }
+    } else {
+      const { error: err } = await supabase.from('expenses').insert(payload)
+      if (err) { setError('Error al guardar: ' + err.message); setSaving(false); return }
+    }
     setSaving(false)
     setShowModal(false)
-    setForm({ description: '', amount: '', category: 'Suministros', payment_method: 'cash', expense_date: new Date().toISOString().split('T')[0], notes: '' })
     load()
   }
 
-  const totalMes = expenses.filter(e => e.expense_date?.startsWith(new Date().toISOString().slice(0, 7))).reduce((s, e) => s + e.amount, 0)
+  async function handleDelete(id: string) {
+    if (!confirm('¿Eliminar este gasto?')) return
+    const supabase = createClient()
+    await supabase.from('expenses').delete().eq('id', id)
+    load()
+  }
+
+  const total = expenses.reduce((s, e) => s + e.amount, 0)
+  const fmt = (n: number) => '$' + n.toLocaleString('es-CO')
 
   return (
     <div className="p-4 max-w-4xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-stone-800">Gastos</h1>
-          <p className="text-stone-500 text-sm mt-0.5">Este mes: <span className="font-semibold text-red-600">{formatCurrency(totalMes)}</span></p>
+          <p className="text-stone-500 text-sm mt-0.5">{expenses.length} registros · Total: {fmt(total)}</p>
         </div>
-        <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 transition-colors shadow-lg shadow-amber-700/20">
+        <button onClick={openNew} className="px-4 py-2 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 transition-colors">
           + Nuevo Gasto
         </button>
       </div>
@@ -67,67 +116,82 @@ export default function GastosPage() {
       {loading ? (
         <div className="flex justify-center py-16"><div className="w-8 h-8 border-4 border-amber-700 border-t-transparent rounded-full animate-spin" /></div>
       ) : expenses.length === 0 ? (
-        <div className="text-center py-16"><p className="text-5xl mb-3">💳</p><p className="text-stone-500">No hay gastos registrados</p></div>
+        <div className="text-center py-16"><p className="text-5xl mb-3">💸</p><p className="text-stone-500">No hay gastos registrados</p></div>
       ) : (
-        <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-stone-50 border-b border-stone-200">
-              <tr>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">Descripción</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">Categoría</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">Fecha</th>
-                <th className="text-right px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">Monto</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-stone-100">
-              {expenses.map((e) => (
-                <tr key={e.id} className="hover:bg-stone-50 transition-colors">
-                  <td className="px-4 py-3">
-                    <p className="font-medium text-stone-800">{e.description}</p>
-                    {e.notes && <p className="text-xs text-stone-400">{e.notes}</p>}
-                  </td>
-                  <td className="px-4 py-3"><span className="text-xs bg-stone-100 text-stone-600 px-2 py-1 rounded-full">{e.category}</span></td>
-                  <td className="px-4 py-3 text-stone-500 text-sm">{formatDate(e.expense_date)}</td>
-                  <td className="px-4 py-3 text-right font-bold text-red-600">{formatCurrency(e.amount)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="grid gap-3">
+          {expenses.map(e => (
+            <div key={e.id} className="bg-white rounded-2xl border border-stone-200 p-4 flex items-center gap-4">
+              <div className="w-12 h-12 bg-red-50 rounded-xl flex items-center justify-center flex-shrink-0">
+                <span className="text-2xl">💸</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="font-semibold text-stone-800">{e.category}</p>
+                  <span className="text-xs bg-stone-100 text-stone-500 px-2 py-0.5 rounded-full">{e.payment_method}</span>
+                </div>
+                {e.description && <p className="text-sm text-stone-500 mt-0.5">{e.description}</p>}
+                <p className="text-xs text-stone-400 mt-0.5">{new Date(e.date + 'T12:00:00').toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+              </div>
+              <div className="text-right flex-shrink-0">
+                <p className="font-bold text-red-600">{fmt(e.amount)}</p>
+                <div className="flex gap-1 mt-1">
+                  <button onClick={() => openEdit(e)} className="px-2 py-1 text-xs border border-stone-200 rounded-lg hover:bg-stone-50">Editar</button>
+                  <button onClick={() => handleDelete(e.id)} className="px-2 py-1 text-xs bg-red-50 text-red-600 rounded-lg hover:bg-red-100">Eliminar</button>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
       {showModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
-            <h3 className="text-lg font-bold text-stone-800 mb-4">Nuevo Gasto</h3>
+            <h3 className="text-lg font-bold text-stone-800 mb-4">{editing ? 'Editar Gasto' : 'Nuevo Gasto'}</h3>
+            {error && <div className="bg-red-50 text-red-700 rounded-xl px-3 py-2 text-sm mb-4">{error}</div>}
             <div className="space-y-3">
-              <div>
-                <label className="block text-sm font-medium text-stone-700 mb-1">Descripción *</label>
-                <input type="text" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" placeholder="Ej: Pago de luz" />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-stone-700 mb-1">Fecha *</label>
+                  <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })}
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-stone-700 mb-1">Monto *</label>
+                  <input type="number" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} placeholder="0"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
+                </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-stone-700 mb-1">Monto ($) *</label>
-                <input type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" placeholder="0" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-stone-700 mb-1">Categoría</label>
-                <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700">
+                <label className="block text-sm font-medium text-stone-700 mb-1">Categoría *</label>
+                <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}
+                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700">
+                  <option value="">Seleccionar...</option>
                   {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-stone-700 mb-1">Fecha</label>
-                <input type="date" value={form.expense_date} onChange={(e) => setForm({ ...form, expense_date: e.target.value })} className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
+                <label className="block text-sm font-medium text-stone-700 mb-1">Descripción</label>
+                <input type="text" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Detalle del gasto"
+                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-1">Forma de pago</label>
+                <select value={form.payment_method} onChange={e => setForm({ ...form, payment_method: e.target.value })}
+                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700">
+                  {PAYMENT_METHODS.map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-stone-700 mb-1">Notas</label>
-                <input type="text" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" placeholder="Opcional" />
+                <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} rows={2} placeholder="Observaciones..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700 resize-none" />
               </div>
             </div>
             <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowModal(false)} className="flex-1 py-2.5 border border-stone-200 rounded-xl text-stone-600 hover:bg-stone-50 transition-colors">Cancelar</button>
-              <button onClick={handleSave} disabled={saving || !form.description || !form.amount} className="flex-1 py-2.5 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 disabled:bg-stone-300 transition-colors">
-                {saving ? 'Guardando...' : 'Guardar'}
+              <button onClick={() => setShowModal(false)} className="flex-1 py-2.5 border border-stone-200 rounded-xl text-stone-600 hover:bg-stone-50">Cancelar</button>
+              <button onClick={handleSave} disabled={saving} className="flex-1 py-2.5 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 disabled:bg-stone-300">
+                {saving ? 'Guardando...' : editing ? 'Actualizar' : 'Guardar'}
               </button>
             </div>
           </div>
