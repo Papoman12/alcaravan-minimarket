@@ -2,247 +2,391 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { formatCurrency, calculateMargin } from '@/lib/utils'
-import type { Product, Category } from '@/types/database'
-import ProductForm from './product-form'
 
-export default function ProductsPage() {
-  const supabase = createClient()
+interface Product {
+  id: string
+  name: string
+  code?: string
+  barcode?: string
+  category_id?: string
+  purchase_price?: number
+  sale_price: number
+  stock?: number
+  min_stock?: number
+  is_active: boolean
+}
+
+interface Category {
+  id: string
+  name: string
+}
+
+export default function ProductosPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(true)
+  const [showModal, setShowModal] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [editing, setEditing] = useState<Product | null>(null)
   const [search, setSearch] = useState('')
-  const [categoryFilter, setCategoryFilter] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive' | 'low_stock'>('all')
-  const [showForm, setShowForm] = useState(false)
-  const [editProduct, setEditProduct] = useState<Product | null>(null)
+  const [error, setError] = useState('')
+  const [form, setForm] = useState({
+    name: '',
+    code: '',
+    barcode: '',
+    category_id: '',
+    purchase_price: '',
+    sale_price: '',
+    stock: '',
+    min_stock: '',
+  })
 
-  async function loadData() {
+  useEffect(() => {
+    load()
+    loadCategories()
+  }, [])
+
+  async function load() {
     setLoading(true)
-    const [{ data: prods }, { data: cats }] = await Promise.all([
-      supabase
-        .from('products')
-        .select('*, category:categories(id, name, icon), brand:brands(name), unit:units_of_measure(abbreviation)')
-        .order('name'),
-      supabase.from('categories').select('*').eq('is_active', true).order('name'),
-    ])
-    setProducts(prods ?? [])
-    setCategories(cats ?? [])
+    const supabase = createClient()
+    const { data } = await supabase
+      .from('products')
+      .select('*')
+      .order('name')
+    setProducts(data ?? [])
     setLoading(false)
   }
 
-  useEffect(() => { loadData() }, [])
-
-  async function handleToggleActive(product: Product) {
-    await supabase
-      .from('products')
-      .update({ is_active: !product.is_active })
-      .eq('id', product.id)
-    loadData()
+  async function loadCategories() {
+    const supabase = createClient()
+    const { data } = await supabase.from('categories').select('id, name').order('name')
+    setCategories(data ?? [])
   }
 
-  const filtered = products.filter((p) => {
-    const matchSearch = !search ||
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      (p.code ?? '').toLowerCase().includes(search.toLowerCase()) ||
-      (p.barcode ?? '').includes(search)
-
-    const matchCat = !categoryFilter || p.category_id === categoryFilter
-
-    const matchStatus =
-      statusFilter === 'all' ? true :
-      statusFilter === 'active' ? p.is_active :
-      statusFilter === 'inactive' ? !p.is_active :
-      statusFilter === 'low_stock' ? (p.stock <= p.min_stock && p.is_active) : true
-
-    return matchSearch && matchCat && matchStatus
-  })
-
-  const stats = {
-    total: products.length,
-    active: products.filter((p) => p.is_active).length,
-    lowStock: products.filter((p) => p.stock <= p.min_stock && p.stock > 0 && p.is_active).length,
-    outOfStock: products.filter((p) => p.stock <= 0 && p.is_active).length,
+  function openNew() {
+    setEditing(null)
+    setError('')
+    setForm({ name: '', code: '', barcode: '', category_id: '', purchase_price: '', sale_price: '', stock: '', min_stock: '' })
+    setShowModal(true)
   }
+
+  function openEdit(p: Product) {
+    setEditing(p)
+    setError('')
+    setForm({
+      name: p.name,
+      code: p.code ?? '',
+      barcode: p.barcode ?? '',
+      category_id: p.category_id ?? '',
+      purchase_price: p.purchase_price?.toString() ?? '',
+      sale_price: p.sale_price.toString(),
+      stock: p.stock?.toString() ?? '',
+      min_stock: p.min_stock?.toString() ?? '',
+    })
+    setShowModal(true)
+  }
+
+  async function handleSave() {
+    if (!form.name || !form.sale_price) {
+      setError('El nombre y el precio de venta son obligatorios')
+      return
+    }
+    setSaving(true)
+    setError('')
+    const supabase = createClient()
+
+    const payload: Record<string, unknown> = {
+      name: form.name.trim(),
+      code: form.code.trim() || null,
+      barcode: form.barcode.trim() || null,
+      category_id: form.category_id || null,
+      purchase_price: form.purchase_price ? parseFloat(form.purchase_price) : null,
+      sale_price: parseFloat(form.sale_price),
+      stock: form.stock ? parseFloat(form.stock) : 0,
+      min_stock: form.min_stock ? parseFloat(form.min_stock) : null,
+      is_active: true,
+    }
+
+    if (editing) {
+      const { error: err } = await supabase.from('products').update(payload).eq('id', editing.id)
+      if (err) { setError('Error al actualizar: ' + err.message); setSaving(false); return }
+    } else {
+      const { error: err } = await supabase.from('products').insert(payload)
+      if (err) { setError('Error al guardar: ' + err.message); setSaving(false); return }
+    }
+
+    setSaving(false)
+    setShowModal(false)
+    load()
+  }
+
+  async function toggleActive(p: Product) {
+    const supabase = createClient()
+    await supabase.from('products').update({ is_active: !p.is_active }).eq('id', p.id)
+    load()
+  }
+
+  const margin = (cost: number, sale: number) =>
+    cost > 0 ? (((sale - cost) / cost) * 100).toFixed(1) : null
+
+  const filtered = products.filter(p =>
+    p.name.toLowerCase().includes(search.toLowerCase()) ||
+    p.code?.toLowerCase().includes(search.toLowerCase()) ||
+    p.barcode?.includes(search)
+  )
+
+  const catName = (id?: string) => categories.find(c => c.id === id)?.name ?? ''
+
+  const fmt = (n?: number) =>
+    n != null ? '$' + n.toLocaleString('es-CO') : '—'
 
   return (
-    <div className="p-4 md:p-6 max-w-7xl mx-auto">
-      {/* Encabezado */}
+    <div className="p-4 max-w-5xl mx-auto">
+      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-stone-800">Productos</h1>
-          <p className="text-stone-500 text-sm">{stats.total} productos registrados</p>
+          <p className="text-stone-500 text-sm mt-0.5">
+            {products.filter(p => p.is_active).length} activos · {products.length} total
+          </p>
         </div>
         <button
-          onClick={() => { setEditProduct(null); setShowForm(true) }}
-          className="flex items-center gap-2 px-4 py-2.5 bg-amber-700 hover:bg-amber-800 text-white font-medium rounded-xl transition-colors shadow-sm shadow-amber-700/30"
+          onClick={openNew}
+          className="px-4 py-2 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 transition-colors shadow-lg shadow-amber-700/20"
         >
           + Nuevo Producto
         </button>
       </div>
 
-      {/* KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-        {[
-          { label: 'Total Productos', value: stats.total, icon: '📦', color: 'bg-blue-50 border-blue-200' },
-          { label: 'Activos', value: stats.active, icon: '✅', color: 'bg-emerald-50 border-emerald-200' },
-          { label: 'Stock Bajo', value: stats.lowStock, icon: '🟡', color: 'bg-yellow-50 border-yellow-200' },
-          { label: 'Agotados', value: stats.outOfStock, icon: '🔴', color: 'bg-red-50 border-red-200' },
-        ].map((stat) => (
-          <div key={stat.label} className={`rounded-xl border p-4 ${stat.color}`}>
-            <span className="text-lg">{stat.icon}</span>
-            <p className="text-2xl font-bold text-stone-800 mt-1">{stat.value}</p>
-            <p className="text-xs text-stone-500">{stat.label}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Filtros */}
-      <div className="bg-white rounded-2xl border border-stone-200 shadow-sm mb-4 p-4">
-        <div className="flex flex-wrap gap-3">
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="🔍 Buscar por nombre, código..."
-            className="flex-1 min-w-48 px-4 py-2.5 rounded-xl border border-stone-200 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700"
-          />
-          <select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            className="px-4 py-2.5 rounded-xl border border-stone-200 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
-          >
-            <option value="">Todas las categorías</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>{c.icon} {c.name}</option>
-            ))}
-          </select>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
-            className="px-4 py-2.5 rounded-xl border border-stone-200 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
-          >
-            <option value="all">Todos los estados</option>
-            <option value="active">Activos</option>
-            <option value="inactive">Inactivos</option>
-            <option value="low_stock">Stock bajo</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Tabla */}
-      <div className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden">
-        {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <span className="w-8 h-8 border-3 border-amber-700/30 border-t-amber-700 rounded-full animate-spin" />
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="text-center py-16">
-            <p className="text-4xl mb-3">📦</p>
-            <p className="text-stone-500 font-medium">No hay productos</p>
-            <button
-              onClick={() => { setEditProduct(null); setShowForm(true) }}
-              className="mt-3 text-amber-700 hover:underline text-sm"
-            >
-              + Crear primer producto
-            </button>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-stone-50 border-b border-stone-200">
-                  <th className="text-left px-4 py-3 font-semibold text-stone-600">Producto</th>
-                  <th className="text-left px-4 py-3 font-semibold text-stone-600">Categoría</th>
-                  <th className="text-right px-4 py-3 font-semibold text-stone-600">Precio</th>
-                  <th className="text-right px-4 py-3 font-semibold text-stone-600">Costo</th>
-                  <th className="text-right px-4 py-3 font-semibold text-stone-600">Margen</th>
-                  <th className="text-right px-4 py-3 font-semibold text-stone-600">Stock</th>
-                  <th className="text-center px-4 py-3 font-semibold text-stone-600">Estado</th>
-                  <th className="text-right px-4 py-3 font-semibold text-stone-600">Acciones</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-stone-100">
-                {filtered.map((product) => {
-                  const margin = calculateMargin(product.sale_price, product.purchase_price)
-                  const stockBadge =
-                    product.stock <= 0
-                      ? 'bg-red-100 text-red-700'
-                      : product.stock <= product.min_stock
-                      ? 'bg-yellow-100 text-yellow-700'
-                      : 'bg-emerald-100 text-emerald-700'
-
-                  return (
-                    <tr key={product.id} className="hover:bg-stone-50/50 transition-colors">
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-stone-100 rounded-lg flex items-center justify-center flex-shrink-0 text-lg">
-                            {product.image_url ? (
-                              <img src={product.image_url} alt="" className="w-full h-full object-cover rounded-lg" />
-                            ) : '📦'}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="font-semibold text-stone-800 truncate">{product.name}</p>
-                            <p className="text-xs text-stone-400">{product.code ?? product.barcode ?? 'Sin código'}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-stone-600">
-                        {(product as any).category?.icon} {(product as any).category?.name ?? '—'}
-                      </td>
-                      <td className="px-4 py-3 text-right font-bold text-stone-800">
-                        {formatCurrency(product.sale_price)}
-                      </td>
-                      <td className="px-4 py-3 text-right text-stone-500">
-                        {formatCurrency(product.purchase_price)}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className={`font-medium ${margin >= 30 ? 'text-emerald-600' : margin >= 15 ? 'text-amber-600' : 'text-red-500'}`}>
-                          {margin.toFixed(1)}%
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className={`px-2 py-1 rounded-lg text-xs font-bold ${stockBadge}`}>
-                          {product.stock} {(product as any).unit?.abbreviation ?? 'und'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <button
-                          onClick={() => handleToggleActive(product)}
-                          className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
-                            product.is_active
-                              ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
-                              : 'bg-stone-100 text-stone-500 hover:bg-stone-200'
-                          }`}
-                        >
-                          {product.is_active ? '✅ Activo' : '⏸ Inactivo'}
-                        </button>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <button
-                          onClick={() => { setEditProduct(product); setShowForm(true) }}
-                          className="px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 rounded-lg transition-colors"
-                        >
-                          Editar
-                        </button>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Modal de formulario */}
-      {showForm && (
-        <ProductForm
-          product={editProduct}
-          categories={categories}
-          onClose={() => setShowForm(false)}
-          onSaved={() => { setShowForm(false); loadData() }}
+      {/* Search */}
+      <div className="mb-4">
+        <input
+          type="text"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Buscar por nombre, código o barras..."
+          className="w-full px-4 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
         />
+      </div>
+
+      {/* List */}
+      {loading ? (
+        <div className="flex justify-center py-16">
+          <div className="w-8 h-8 border-4 border-amber-700 border-t-transparent rounded-full animate-spin" />
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="text-center py-16">
+          <p className="text-5xl mb-3">📦</p>
+          <p className="text-stone-500">
+            {search ? 'No se encontraron productos' : 'No hay productos registrados'}
+          </p>
+        </div>
+      ) : (
+        <div className="grid gap-3">
+          {filtered.map(p => {
+            const m = p.purchase_price ? margin(p.purchase_price, p.sale_price) : null
+            return (
+              <div
+                key={p.id}
+                className={`bg-white rounded-2xl border p-4 flex items-center gap-4 ${p.is_active ? 'border-stone-200' : 'border-stone-100 opacity-60'}`}
+              >
+                <div className="w-12 h-12 bg-amber-50 rounded-xl flex items-center justify-center flex-shrink-0">
+                  <span className="text-2xl">📦</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-semibold text-stone-800">{p.name}</p>
+                    {!p.is_active && (
+                      <span className="text-xs bg-stone-100 text-stone-500 px-2 py-0.5 rounded-full">Inactivo</span>
+                    )}
+                    {p.category_id && (
+                      <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
+                        {catName(p.category_id)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex gap-4 mt-1 flex-wrap">
+                    <span className="text-sm font-bold text-amber-700">{fmt(p.sale_price)}</span>
+                    {p.purchase_price && (
+                      <span className="text-sm text-stone-500">Costo: {fmt(p.purchase_price)}</span>
+                    )}
+                    {m && (
+                      <span className="text-sm text-emerald-600 font-medium">{m}% margen</span>
+                    )}
+                    {p.stock != null && (
+                      <span className={`text-sm font-medium ${(p.stock ?? 0) <= (p.min_stock ?? 0) ? 'text-red-600' : 'text-stone-500'}`}>
+                        Stock: {p.stock}
+                        {(p.stock ?? 0) <= (p.min_stock ?? 0) && ' ⚠️'}
+                      </span>
+                    )}
+                  </div>
+                  {(p.code || p.barcode) && (
+                    <p className="text-xs text-stone-400 mt-0.5">
+                      {p.code && `Cód: ${p.code}`}{p.code && p.barcode && ' · '}{p.barcode && `Barras: ${p.barcode}`}
+                    </p>
+                  )}
+                </div>
+                <div className="flex gap-2 flex-shrink-0">
+                  <button
+                    onClick={() => openEdit(p)}
+                    className="px-3 py-1.5 text-sm border border-stone-200 rounded-lg text-stone-600 hover:bg-stone-50 transition-colors"
+                  >
+                    Editar
+                  </button>
+                  <button
+                    onClick={() => toggleActive(p)}
+                    className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${p.is_active ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'}`}
+                  >
+                    {p.is_active ? 'Desactivar' : 'Activar'}
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Modal */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-lg font-bold text-stone-800 mb-4">
+              {editing ? 'Editar Producto' : 'Nuevo Producto'}
+            </h3>
+
+            {error && (
+              <div className="bg-red-50 text-red-700 rounded-xl px-3 py-2 text-sm mb-4">
+                {error}
+              </div>
+            )}
+
+            <div className="space-y-3">
+              <p className="text-xs font-semibold text-stone-400 uppercase tracking-wider">Información básica</p>
+
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-1">Nombre *</label>
+                <input
+                  type="text"
+                  value={form.name}
+                  onChange={e => setForm({ ...form, name: e.target.value })}
+                  placeholder="Ej: Agua Cristal 600ml"
+                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-stone-700 mb-1">Código interno</label>
+                  <input
+                    type="text"
+                    value={form.code}
+                    onChange={e => setForm({ ...form, code: e.target.value })}
+                    placeholder="P001"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-stone-700 mb-1">Código de barras</label>
+                  <input
+                    type="text"
+                    value={form.barcode}
+                    onChange={e => setForm({ ...form, barcode: e.target.value })}
+                    placeholder="Escanea el código"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-1">Categoría</label>
+                <select
+                  value={form.category_id}
+                  onChange={e => setForm({ ...form, category_id: e.target.value })}
+                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700"
+                >
+                  <option value="">Seleccionar categoría</option>
+                  {categories.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <p className="text-xs font-semibold text-stone-400 uppercase tracking-wider pt-2">Precios</p>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-stone-700 mb-1">Precio de costo</label>
+                  <input
+                    type="number"
+                    value={form.purchase_price}
+                    onChange={e => setForm({ ...form, purchase_price: e.target.value })}
+                    placeholder="0"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-stone-700 mb-1">Precio de venta *</label>
+                  <input
+                    type="number"
+                    value={form.sale_price}
+                    onChange={e => setForm({ ...form, sale_price: e.target.value })}
+                    placeholder="0"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700"
+                  />
+                </div>
+              </div>
+
+              {form.purchase_price && form.sale_price && (
+                <div className="bg-emerald-50 rounded-xl px-3 py-2 text-sm text-emerald-700">
+                  Margen de utilidad: <strong>
+                    {(((parseFloat(form.sale_price) - parseFloat(form.purchase_price)) / parseFloat(form.purchase_price)) * 100).toFixed(1)}%
+                  </strong>
+                </div>
+              )}
+
+              <p className="text-xs font-semibold text-stone-400 uppercase tracking-wider pt-2">Inventario</p>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-stone-700 mb-1">Stock inicial</label>
+                  <input
+                    type="number"
+                    value={form.stock}
+                    onChange={e => setForm({ ...form, stock: e.target.value })}
+                    placeholder="0"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-stone-700 mb-1">Stock mínimo</label>
+                  <input
+                    type="number"
+                    value={form.min_stock}
+                    onChange={e => setForm({ ...form, min_stock: e.target.value })}
+                    placeholder="0"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => setShowModal(false)}
+                className="flex-1 py-2.5 border border-stone-200 rounded-xl text-stone-600 hover:bg-stone-50 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={saving || !form.name || !form.sale_price}
+                className="flex-1 py-2.5 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 disabled:bg-stone-300 transition-colors"
+              >
+                {saving ? 'Guardando...' : editing ? 'Actualizar' : 'Guardar'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
