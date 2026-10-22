@@ -2,14 +2,15 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useIsAdmin } from '@/lib/useIsAdmin'
 
 const BRANCH_ID = '56916f1b-17dc-4c3d-8e65-a7d2a6554891'
 
 interface Customer {
   id: string
   first_name: string
-  last_name: string
-  full_name: string
+  last_name?: string
+  full_name?: string
   document_type?: string
   document_number?: string
   phone?: string
@@ -18,12 +19,13 @@ interface Customer {
   address?: string
   city?: string
   is_active: boolean
-  loyalty_points?: number
+  created_at: string
 }
 
-const DOC_TYPES = ['CC', 'NIT', 'CE', 'Pasaporte', 'TI']
+const DOC_TYPES = ['CC', 'NIT', 'CE', 'PP', 'Otro']
 
 export default function ClientesPage() {
+  const isAdmin = useIsAdmin()
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -32,15 +34,8 @@ export default function ClientesPage() {
   const [search, setSearch] = useState('')
   const [error, setError] = useState('')
   const [form, setForm] = useState({
-    first_name: '',
-    last_name: '',
-    document_type: 'CC',
-    document_number: '',
-    phone: '',
-    whatsapp: '',
-    email: '',
-    address: '',
-    city: '',
+    first_name: '', last_name: '', document_type: 'CC', document_number: '',
+    phone: '', whatsapp: '', email: '', address: '', city: '',
   })
 
   useEffect(() => { load() }, [])
@@ -51,7 +46,7 @@ export default function ClientesPage() {
     const { data } = await supabase
       .from('customers')
       .select('*')
-      .order('full_name')
+      .order('first_name')
       .limit(200)
     setCustomers(data ?? [])
     setLoading(false)
@@ -69,7 +64,7 @@ export default function ClientesPage() {
     setError('')
     setForm({
       first_name: c.first_name,
-      last_name: c.last_name,
+      last_name: c.last_name ?? '',
       document_type: c.document_type ?? 'CC',
       document_number: c.document_number ?? '',
       phone: c.phone ?? '',
@@ -82,18 +77,15 @@ export default function ClientesPage() {
   }
 
   async function handleSave() {
-    if (!form.first_name) {
-      setError('El nombre es obligatorio')
-      return
-    }
+    if (!form.first_name.trim()) { setError('El nombre es obligatorio'); return }
     setSaving(true)
     setError('')
     const supabase = createClient()
-    const fullName = (form.first_name.trim() + ' ' + form.last_name.trim()).trim()
+    const fullName = [form.first_name.trim(), form.last_name.trim()].filter(Boolean).join(' ')
     const payload = {
       branch_id: BRANCH_ID,
       first_name: form.first_name.trim(),
-      last_name: form.last_name.trim(),
+      last_name: form.last_name.trim() || null,
       full_name: fullName,
       document_type: form.document_type || null,
       document_number: form.document_number.trim() || null,
@@ -106,22 +98,12 @@ export default function ClientesPage() {
     }
     if (editing) {
       const { error: err } = await supabase.from('customers').update(payload).eq('id', editing.id)
-      if (err) {
-        if (err.message.includes('unique') || err.message.includes('duplicate')) {
-          setError('Ya existe un cliente con ese número de documento')
-        } else {
-          setError('Error al actualizar: ' + err.message)
-        }
-        setSaving(false); return
-      }
+      if (err) { setError('Error al actualizar: ' + err.message); setSaving(false); return }
     } else {
       const { error: err } = await supabase.from('customers').insert(payload)
       if (err) {
-        if (err.message.includes('unique') || err.message.includes('duplicate')) {
-          setError('Ya existe un cliente con ese número de documento')
-        } else {
-          setError('Error al guardar: ' + err.message)
-        }
+        if (err.code === '23505') { setError('Error al guardar. Verifica que el documento no esté duplicado.') }
+        else { setError('Error al guardar: ' + err.message) }
         setSaving(false); return
       }
     }
@@ -130,65 +112,59 @@ export default function ClientesPage() {
     load()
   }
 
-  async function toggleActive(c: Customer) {
+  async function handleDelete(id: string) {
+    if (!window.confirm('¿Eliminar este cliente? Esta acción no se puede deshacer.')) return
     const supabase = createClient()
-    await supabase.from('customers').update({ is_active: !c.is_active }).eq('id', c.id)
+    const { error: err } = await supabase.from('customers').delete().eq('id', id)
+    if (err) { alert('Error al eliminar: ' + err.message); return }
     load()
   }
 
-  const filtered = customers.filter(c =>
-    c.full_name?.toLowerCase().includes(search.toLowerCase()) ||
-    c.phone?.includes(search) ||
-    c.document_number?.includes(search)
-  )
+  const filtered = customers.filter(c => {
+    const q = search.toLowerCase()
+    return !q || c.first_name.toLowerCase().includes(q) || (c.last_name ?? '').toLowerCase().includes(q) ||
+      (c.phone ?? '').includes(q) || (c.document_number ?? '').includes(q)
+  })
 
   return (
     <div className="p-4 max-w-4xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-stone-800">Clientes</h1>
-          <p className="text-stone-500 text-sm mt-0.5">{customers.filter(c => c.is_active).length} activos · {customers.length} total</p>
+          <p className="text-stone-500 text-sm mt-0.5">{customers.length} registrados</p>
         </div>
         <button onClick={openNew} className="px-4 py-2 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 transition-colors">
           + Nuevo Cliente
         </button>
       </div>
 
-      <div className="mb-4">
-        <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por nombre, teléfono o documento..."
-          className="w-full px-4 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white" />
-      </div>
+      <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por nombre, teléfono o documento..."
+        className="w-full px-4 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700 mb-4" />
 
       {loading ? (
         <div className="flex justify-center py-16"><div className="w-8 h-8 border-4 border-amber-700 border-t-transparent rounded-full animate-spin" /></div>
       ) : filtered.length === 0 ? (
-        <div className="text-center py-16"><p className="text-5xl mb-3">👥</p><p className="text-stone-500">{search ? 'No se encontraron clientes' : 'No hay clientes registrados'}</p></div>
+        <div className="text-center py-16"><p className="text-5xl mb-3">👥</p><p className="text-stone-500">No hay clientes registrados</p></div>
       ) : (
         <div className="grid gap-3">
           {filtered.map(c => (
-            <div key={c.id} className={`bg-white rounded-2xl border p-4 flex items-center gap-4 ${c.is_active ? 'border-stone-200' : 'border-stone-100 opacity-60'}`}>
+            <div key={c.id} className="bg-white rounded-2xl border border-stone-200 p-4 flex items-center gap-4">
               <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center flex-shrink-0">
                 <span className="text-2xl">👤</span>
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p className="font-semibold text-stone-800">{c.full_name}</p>
-                  {!c.is_active && <span className="text-xs bg-stone-100 text-stone-500 px-2 py-0.5 rounded-full">Inactivo</span>}
-                  {c.loyalty_points != null && c.loyalty_points > 0 && (
-                    <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">⭐ {c.loyalty_points} pts</span>
-                  )}
-                </div>
+                <p className="font-semibold text-stone-800">{c.full_name ?? c.first_name}</p>
                 <div className="flex gap-3 mt-0.5 flex-wrap">
+                  {c.document_number && <span className="text-sm text-stone-500">{c.document_type} {c.document_number}</span>}
                   {c.phone && <span className="text-sm text-stone-500">📞 {c.phone}</span>}
-                  {c.document_number && <span className="text-sm text-stone-500">{c.document_type}: {c.document_number}</span>}
-                  {c.city && <span className="text-sm text-stone-500">📍 {c.city}</span>}
+                  {c.city && <span className="text-sm text-stone-400">{c.city}</span>}
                 </div>
               </div>
               <div className="flex gap-2 flex-shrink-0">
                 <button onClick={() => openEdit(c)} className="px-3 py-1.5 text-sm border border-stone-200 rounded-lg text-stone-600 hover:bg-stone-50">Editar</button>
-                <button onClick={() => toggleActive(c)} className={`px-3 py-1.5 text-sm rounded-lg ${c.is_active ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'}`}>
-                  {c.is_active ? 'Desactivar' : 'Activar'}
-                </button>
+                {isAdmin && (
+                  <button onClick={() => handleDelete(c.id)} className="px-3 py-1.5 text-sm bg-red-50 text-red-600 rounded-lg hover:bg-red-100">Eliminar</button>
+                )}
               </div>
             </div>
           ))}
@@ -197,7 +173,7 @@ export default function ClientesPage() {
 
       {showModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
             <h3 className="text-lg font-bold text-stone-800 mb-4">{editing ? 'Editar Cliente' : 'Nuevo Cliente'}</h3>
             {error && <div className="bg-red-50 text-red-700 rounded-xl px-3 py-2 text-sm mb-4">{error}</div>}
             <div className="space-y-3">
@@ -215,15 +191,15 @@ export default function ClientesPage() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-stone-700 mb-1">Tipo documento</label>
+                  <label className="block text-sm font-medium text-stone-700 mb-1">Tipo doc.</label>
                   <select value={form.document_type} onChange={e => setForm({ ...form, document_type: e.target.value })}
                     className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700">
                     {DOC_TYPES.map(d => <option key={d} value={d}>{d}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-stone-700 mb-1">Número documento</label>
-                  <input type="text" value={form.document_number} onChange={e => setForm({ ...form, document_number: e.target.value })} placeholder="Ej: 12345678"
+                  <label className="block text-sm font-medium text-stone-700 mb-1">Número doc.</label>
+                  <input type="text" value={form.document_number} onChange={e => setForm({ ...form, document_number: e.target.value })} placeholder="123456789"
                     className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
                 </div>
               </div>
@@ -240,7 +216,7 @@ export default function ClientesPage() {
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-stone-700 mb-1">Correo electrónico</label>
+                <label className="block text-sm font-medium text-stone-700 mb-1">Email</label>
                 <input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="correo@ejemplo.com"
                   className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
               </div>
