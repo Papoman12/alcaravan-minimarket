@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useIsAdmin } from '@/lib/useIsAdmin'
 
 const BRANCH_ID = '56916f1b-17dc-4c3d-8e65-a7d2a6554891'
 
@@ -15,7 +16,6 @@ interface Promotion {
   ends_at?: string
   is_active: boolean
   uses_count?: number
-  max_uses?: number
 }
 
 const PROMO_TYPES = [
@@ -26,62 +26,40 @@ const PROMO_TYPES = [
 ]
 
 export default function PromocionesPage() {
+  const isAdmin = useIsAdmin()
   const [promos, setPromos] = useState<Promotion[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [saving, setSaving] = useState(false)
   const [editing, setEditing] = useState<Promotion | null>(null)
   const [error, setError] = useState('')
-  const [form, setForm] = useState({
-    name: '',
-    description: '',
-    type: 'percentage',
-    discount_value: '',
-    starts_at: '',
-    ends_at: '',
-  })
+  const [form, setForm] = useState({ name: '', description: '', type: 'percentage', discount_value: '', starts_at: '', ends_at: '' })
 
   useEffect(() => { load() }, [])
 
   async function load() {
     setLoading(true)
     const supabase = createClient()
-    const { data } = await supabase
-      .from('promotions')
-      .select('*')
-      .order('created_at', { ascending: false })
+    const { data } = await supabase.from('promotions').select('*').order('created_at', { ascending: false })
     setPromos(data ?? [])
     setLoading(false)
   }
 
   function openNew() {
-    setEditing(null)
-    setError('')
+    setEditing(null); setError('')
     setForm({ name: '', description: '', type: 'percentage', discount_value: '', starts_at: '', ends_at: '' })
     setShowModal(true)
   }
 
   function openEdit(p: Promotion) {
-    setEditing(p)
-    setError('')
-    setForm({
-      name: p.name,
-      description: p.description ?? '',
-      type: p.type,
-      discount_value: p.discount_value.toString(),
-      starts_at: p.starts_at ? p.starts_at.split('T')[0] : '',
-      ends_at: p.ends_at ? p.ends_at.split('T')[0] : '',
-    })
+    setEditing(p); setError('')
+    setForm({ name: p.name, description: p.description ?? '', type: p.type, discount_value: p.discount_value.toString(), starts_at: p.starts_at ? p.starts_at.split('T')[0] : '', ends_at: p.ends_at ? p.ends_at.split('T')[0] : '' })
     setShowModal(true)
   }
 
   async function handleSave() {
-    if (!form.name || !form.discount_value) {
-      setError('El nombre y el valor del descuento son obligatorios')
-      return
-    }
-    setSaving(true)
-    setError('')
+    if (!form.name || !form.discount_value) { setError('El nombre y el valor del descuento son obligatorios'); return }
+    setSaving(true); setError('')
     const supabase = createClient()
     const payload = {
       branch_id: BRANCH_ID,
@@ -101,14 +79,20 @@ export default function PromocionesPage() {
       const { error: err } = await supabase.from('promotions').insert(payload)
       if (err) { setError('Error al guardar: ' + err.message); setSaving(false); return }
     }
-    setSaving(false)
-    setShowModal(false)
-    load()
+    setSaving(false); setShowModal(false); load()
   }
 
   async function toggleActive(p: Promotion) {
     const supabase = createClient()
     await supabase.from('promotions').update({ is_active: !p.is_active }).eq('id', p.id)
+    load()
+  }
+
+  async function handleDelete(id: string) {
+    if (!window.confirm('¿Eliminar esta promoción? Esta acción no se puede deshacer.')) return
+    const supabase = createClient()
+    const { error: err } = await supabase.from('promotions').delete().eq('id', id)
+    if (err) { alert('Error al eliminar: ' + err.message); return }
     load()
   }
 
@@ -122,9 +106,7 @@ export default function PromocionesPage() {
           <h1 className="text-2xl font-bold text-stone-800">Promociones</h1>
           <p className="text-stone-500 text-sm mt-0.5">{promos.filter(p => p.is_active).length} activas · {promos.length} total</p>
         </div>
-        <button onClick={openNew} className="px-4 py-2 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 transition-colors">
-          + Nueva Promoción
-        </button>
+        <button onClick={openNew} className="px-4 py-2 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 transition-colors">+ Nueva Promoción</button>
       </div>
 
       {loading ? (
@@ -135,9 +117,7 @@ export default function PromocionesPage() {
         <div className="grid gap-3">
           {promos.map(p => (
             <div key={p.id} className={`bg-white rounded-2xl border p-4 flex items-center gap-4 ${p.is_active ? 'border-stone-200' : 'border-stone-100 opacity-60'}`}>
-              <div className="w-12 h-12 bg-purple-50 rounded-xl flex items-center justify-center flex-shrink-0">
-                <span className="text-2xl">🎁</span>
-              </div>
+              <div className="w-12 h-12 bg-purple-50 rounded-xl flex items-center justify-center flex-shrink-0"><span className="text-2xl">🎁</span></div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <p className="font-semibold text-stone-800">{p.name}</p>
@@ -147,15 +127,17 @@ export default function PromocionesPage() {
                 {p.description && <p className="text-sm text-stone-500 mt-0.5">{p.description}</p>}
                 <div className="flex gap-3 mt-0.5 flex-wrap">
                   <span className="text-sm font-bold text-purple-700">{fmt(p.discount_value, p.type)}</span>
-                  {p.uses_count != null && <span className="text-sm text-stone-400">{p.uses_count} usos</span>}
                   {p.ends_at && <span className="text-sm text-stone-400">Vence: {new Date(p.ends_at).toLocaleDateString('es-CO')}</span>}
                 </div>
               </div>
-              <div className="flex gap-2 flex-shrink-0">
+              <div className="flex gap-2 flex-shrink-0 flex-wrap justify-end">
                 <button onClick={() => openEdit(p)} className="px-3 py-1.5 text-sm border border-stone-200 rounded-lg text-stone-600 hover:bg-stone-50">Editar</button>
                 <button onClick={() => toggleActive(p)} className={`px-3 py-1.5 text-sm rounded-lg ${p.is_active ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'}`}>
                   {p.is_active ? 'Desactivar' : 'Activar'}
                 </button>
+                {isAdmin && (
+                  <button onClick={() => handleDelete(p.id)} className="px-3 py-1.5 text-sm bg-red-50 text-red-600 rounded-lg hover:bg-red-100">Eliminar</button>
+                )}
               </div>
             </div>
           ))}
@@ -187,9 +169,7 @@ export default function PromocionesPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-stone-700 mb-1">
-                    {form.type === 'percentage' ? 'Descuento (%)' : 'Descuento ($)'} *
-                  </label>
+                  <label className="block text-sm font-medium text-stone-700 mb-1">{form.type === 'percentage' ? 'Descuento (%)' : 'Descuento ($)'} *</label>
                   <input type="number" value={form.discount_value} onChange={e => setForm({ ...form, discount_value: e.target.value })} placeholder="0"
                     className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
                 </div>
