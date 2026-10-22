@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useIsAdmin } from '@/lib/useIsAdmin'
 
 const BRANCH_ID = '56916f1b-17dc-4c3d-8e65-a7d2a6554891'
 
@@ -9,16 +10,18 @@ interface Expense {
   id: string
   date: string
   category: string
-  description: string
+  description?: string
   amount: number
-  payment_method: string
+  payment_method?: string
   notes?: string
+  created_at: string
 }
 
 const CATEGORIES = ['Arriendo', 'Servicios públicos', 'Nómina', 'Proveedores', 'Mantenimiento', 'Marketing', 'Transporte', 'Otros']
-const PAYMENT_METHODS = ['Efectivo', 'Transferencia', 'Tarjeta débito', 'Tarjeta crédito', 'Nequi', 'Daviplata']
+const PAYMENT_METHODS = ['Efectivo', 'Transferencia', 'Nequi', 'Daviplata', 'Tarjeta']
 
 export default function GastosPage() {
+  const isAdmin = useIsAdmin()
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -27,7 +30,7 @@ export default function GastosPage() {
   const [error, setError] = useState('')
   const [form, setForm] = useState({
     date: new Date().toISOString().split('T')[0],
-    category: '',
+    category: 'Otros',
     description: '',
     amount: '',
     payment_method: 'Efectivo',
@@ -51,22 +54,26 @@ export default function GastosPage() {
   function openNew() {
     setEditing(null)
     setError('')
-    setForm({ date: new Date().toISOString().split('T')[0], category: '', description: '', amount: '', payment_method: 'Efectivo', notes: '' })
+    setForm({ date: new Date().toISOString().split('T')[0], category: 'Otros', description: '', amount: '', payment_method: 'Efectivo', notes: '' })
     setShowModal(true)
   }
 
   function openEdit(e: Expense) {
     setEditing(e)
     setError('')
-    setForm({ date: e.date, category: e.category, description: e.description, amount: e.amount.toString(), payment_method: e.payment_method, notes: e.notes ?? '' })
+    setForm({
+      date: e.date,
+      category: e.category,
+      description: e.description ?? '',
+      amount: e.amount.toString(),
+      payment_method: e.payment_method ?? 'Efectivo',
+      notes: e.notes ?? '',
+    })
     setShowModal(true)
   }
 
   async function handleSave() {
-    if (!form.date || !form.category || !form.amount) {
-      setError('Fecha, categoría y monto son obligatorios')
-      return
-    }
+    if (!form.amount || !form.date) { setError('Monto y fecha son obligatorios'); return }
     setSaving(true)
     setError('')
     const supabase = createClient()
@@ -92,9 +99,10 @@ export default function GastosPage() {
   }
 
   async function handleDelete(id: string) {
-    if (!confirm('¿Eliminar este gasto?')) return
+    if (!window.confirm('¿Eliminar este gasto? Esta acción no se puede deshacer.')) return
     const supabase = createClient()
-    await supabase.from('expenses').delete().eq('id', id)
+    const { error: err } = await supabase.from('expenses').delete().eq('id', id)
+    if (err) { alert('Error al eliminar: ' + err.message); return }
     load()
   }
 
@@ -127,17 +135,19 @@ export default function GastosPage() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <p className="font-semibold text-stone-800">{e.category}</p>
-                  <span className="text-xs bg-stone-100 text-stone-500 px-2 py-0.5 rounded-full">{e.payment_method}</span>
+                  <span className="text-xs bg-stone-100 text-stone-600 px-2 py-0.5 rounded-full">{e.payment_method}</span>
                 </div>
                 {e.description && <p className="text-sm text-stone-500 mt-0.5">{e.description}</p>}
-                <p className="text-xs text-stone-400 mt-0.5">{new Date(e.date + 'T12:00:00').toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
-              </div>
-              <div className="text-right flex-shrink-0">
-                <p className="font-bold text-red-600">{fmt(e.amount)}</p>
-                <div className="flex gap-1 mt-1">
-                  <button onClick={() => openEdit(e)} className="px-2 py-1 text-xs border border-stone-200 rounded-lg hover:bg-stone-50">Editar</button>
-                  <button onClick={() => handleDelete(e.id)} className="px-2 py-1 text-xs bg-red-50 text-red-600 rounded-lg hover:bg-red-100">Eliminar</button>
+                <div className="flex gap-3 mt-0.5 flex-wrap">
+                  <span className="text-sm font-bold text-red-600">{fmt(e.amount)}</span>
+                  <span className="text-sm text-stone-400">{new Date(e.date + 'T12:00:00').toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
                 </div>
+              </div>
+              <div className="flex gap-2 flex-shrink-0">
+                <button onClick={() => openEdit(e)} className="px-3 py-1.5 text-sm border border-stone-200 rounded-lg text-stone-600 hover:bg-stone-50">Editar</button>
+                {isAdmin && (
+                  <button onClick={() => handleDelete(e.id)} className="px-3 py-1.5 text-sm bg-red-50 text-red-600 rounded-lg hover:bg-red-100">Eliminar</button>
+                )}
               </div>
             </div>
           ))}
@@ -162,25 +172,26 @@ export default function GastosPage() {
                     className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
                 </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-stone-700 mb-1">Categoría *</label>
-                <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}
-                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700">
-                  <option value="">Seleccionar...</option>
-                  {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-stone-700 mb-1">Categoría</label>
+                  <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700">
+                    {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-stone-700 mb-1">Método de pago</label>
+                  <select value={form.payment_method} onChange={e => setForm({ ...form, payment_method: e.target.value })}
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700">
+                    {PAYMENT_METHODS.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-stone-700 mb-1">Descripción</label>
                 <input type="text" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Detalle del gasto"
                   className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-stone-700 mb-1">Forma de pago</label>
-                <select value={form.payment_method} onChange={e => setForm({ ...form, payment_method: e.target.value })}
-                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700">
-                  {PAYMENT_METHODS.map(p => <option key={p} value={p}>{p}</option>)}
-                </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-stone-700 mb-1">Notas</label>
