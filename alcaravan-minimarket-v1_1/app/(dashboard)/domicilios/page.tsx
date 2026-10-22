@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useIsAdmin } from '@/lib/useIsAdmin'
 
 const BRANCH_ID = '56916f1b-17dc-4c3d-8e65-a7d2a6554891'
 
@@ -30,6 +31,7 @@ const STATUS_OPTIONS = [
 const PAYMENT_METHODS = ['Efectivo', 'Transferencia', 'Nequi', 'Daviplata', 'Tarjeta']
 
 export default function DomiciliosPage() {
+  const isAdmin = useIsAdmin()
   const [deliveries, setDeliveries] = useState<Delivery[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -38,14 +40,8 @@ export default function DomiciliosPage() {
   const [filterStatus, setFilterStatus] = useState('all')
   const [error, setError] = useState('')
   const [form, setForm] = useState({
-    customer_name: '',
-    customer_phone: '',
-    delivery_address: '',
-    delivery_reference: '',
-    city: '',
-    delivery_fee: '',
-    payment_method: 'Efectivo',
-    notes: '',
+    customer_name: '', customer_phone: '', delivery_address: '',
+    delivery_reference: '', city: '', delivery_fee: '', payment_method: 'Efectivo', notes: '',
   })
 
   useEffect(() => { load() }, [])
@@ -53,45 +49,31 @@ export default function DomiciliosPage() {
   async function load() {
     setLoading(true)
     const supabase = createClient()
-    const { data } = await supabase
-      .from('deliveries')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(100)
+    const { data } = await supabase.from('deliveries').select('*').order('created_at', { ascending: false }).limit(100)
     setDeliveries(data ?? [])
     setLoading(false)
   }
 
   function openNew() {
-    setEditing(null)
-    setError('')
+    setEditing(null); setError('')
     setForm({ customer_name: '', customer_phone: '', delivery_address: '', delivery_reference: '', city: '', delivery_fee: '', payment_method: 'Efectivo', notes: '' })
     setShowModal(true)
   }
 
   function openEdit(d: Delivery) {
-    setEditing(d)
-    setError('')
+    setEditing(d); setError('')
     setForm({
-      customer_name: d.customer_name,
-      customer_phone: d.customer_phone ?? '',
-      delivery_address: d.delivery_address,
-      delivery_reference: d.delivery_reference ?? '',
-      city: d.city ?? '',
-      delivery_fee: d.delivery_fee?.toString() ?? '',
-      payment_method: d.payment_method ?? 'Efectivo',
-      notes: d.notes ?? '',
+      customer_name: d.customer_name, customer_phone: d.customer_phone ?? '',
+      delivery_address: d.delivery_address, delivery_reference: d.delivery_reference ?? '',
+      city: d.city ?? '', delivery_fee: d.delivery_fee?.toString() ?? '',
+      payment_method: d.payment_method ?? 'Efectivo', notes: d.notes ?? '',
     })
     setShowModal(true)
   }
 
   async function handleSave() {
-    if (!form.customer_name || !form.delivery_address) {
-      setError('Nombre del cliente y dirección son obligatorios')
-      return
-    }
-    setSaving(true)
-    setError('')
+    if (!form.customer_name || !form.delivery_address) { setError('Nombre del cliente y dirección son obligatorios'); return }
+    setSaving(true); setError('')
     const supabase = createClient()
     const payload = {
       branch_id: BRANCH_ID,
@@ -112,14 +94,20 @@ export default function DomiciliosPage() {
       const { error: err } = await supabase.from('deliveries').insert(payload)
       if (err) { setError('Error al guardar: ' + err.message); setSaving(false); return }
     }
-    setSaving(false)
-    setShowModal(false)
-    load()
+    setSaving(false); setShowModal(false); load()
   }
 
   async function updateStatus(id: string, status: string) {
     const supabase = createClient()
     await supabase.from('deliveries').update({ status }).eq('id', id)
+    load()
+  }
+
+  async function handleDelete(id: string) {
+    if (!window.confirm('¿Eliminar este domicilio? Esta acción no se puede deshacer.')) return
+    const supabase = createClient()
+    const { error: err } = await supabase.from('deliveries').delete().eq('id', id)
+    if (err) { alert('Error al eliminar: ' + err.message); return }
     load()
   }
 
@@ -132,11 +120,9 @@ export default function DomiciliosPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-stone-800">Domicilios</h1>
-          <p className="text-stone-500 text-sm mt-0.5">{deliveries.filter(d => d.status === 'pending').length} pendientes · {deliveries.length} hoy</p>
+          <p className="text-stone-500 text-sm mt-0.5">{deliveries.filter(d => d.status === 'pending').length} pendientes · {deliveries.length} total</p>
         </div>
-        <button onClick={openNew} className="px-4 py-2 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 transition-colors">
-          + Nuevo Domicilio
-        </button>
+        <button onClick={openNew} className="px-4 py-2 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 transition-colors">+ Nuevo Domicilio</button>
       </div>
 
       <div className="flex gap-2 mb-4 flex-wrap">
@@ -162,37 +148,31 @@ export default function DomiciliosPage() {
             return (
               <div key={d.id} className="bg-white rounded-2xl border border-stone-200 p-4">
                 <div className="flex items-start gap-4">
-                  <div className="w-12 h-12 bg-orange-50 rounded-xl flex items-center justify-center flex-shrink-0">
-                    <span className="text-2xl">🛵</span>
-                  </div>
+                  <div className="w-12 h-12 bg-orange-50 rounded-xl flex items-center justify-center flex-shrink-0"><span className="text-2xl">🛵</span></div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-semibold text-stone-800">{d.customer_name}</p>
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${si.color}`}>{si.label}</span>
                     </div>
                     <p className="text-sm text-stone-600 mt-0.5">📍 {d.delivery_address}{d.city ? `, ${d.city}` : ''}</p>
-                    {d.delivery_reference && <p className="text-xs text-stone-400">{d.delivery_reference}</p>}
                     <div className="flex gap-3 mt-1 flex-wrap">
                       {d.customer_phone && <span className="text-sm text-stone-500">📞 {d.customer_phone}</span>}
                       {d.delivery_fee != null && d.delivery_fee > 0 && <span className="text-sm font-medium text-amber-700">Flete: {fmt(d.delivery_fee)}</span>}
-                      {d.payment_method && <span className="text-sm text-stone-500">{d.payment_method}</span>}
                     </div>
                   </div>
                   <div className="flex gap-2 flex-shrink-0">
                     <button onClick={() => openEdit(d)} className="px-3 py-1.5 text-sm border border-stone-200 rounded-lg text-stone-600 hover:bg-stone-50">Editar</button>
+                    {isAdmin && (
+                      <button onClick={() => handleDelete(d.id)} className="px-3 py-1.5 text-sm bg-red-50 text-red-600 rounded-lg hover:bg-red-100">Eliminar</button>
+                    )}
                   </div>
                 </div>
                 {d.status !== 'delivered' && d.status !== 'cancelled' && (
                   <div className="flex gap-2 mt-3 flex-wrap">
                     {STATUS_OPTIONS.filter(s => s.value !== d.status && s.value !== 'cancelled').map(s => (
-                      <button key={s.value} onClick={() => updateStatus(d.id, s.value)}
-                        className={`px-3 py-1 text-xs rounded-lg font-medium ${s.color}`}>
-                        → {s.label}
-                      </button>
+                      <button key={s.value} onClick={() => updateStatus(d.id, s.value)} className={`px-3 py-1 text-xs rounded-lg font-medium ${s.color}`}>→ {s.label}</button>
                     ))}
-                    <button onClick={() => updateStatus(d.id, 'cancelled')} className="px-3 py-1 text-xs rounded-lg font-medium bg-red-50 text-red-600">
-                      Cancelar
-                    </button>
+                    <button onClick={() => updateStatus(d.id, 'cancelled')} className="px-3 py-1 text-xs rounded-lg font-medium bg-red-50 text-red-600">Cancelar</button>
                   </div>
                 )}
               </div>
@@ -227,7 +207,7 @@ export default function DomiciliosPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-stone-700 mb-1">Referencia</label>
-                  <input type="text" value={form.delivery_reference} onChange={e => setForm({ ...form, delivery_reference: e.target.value })} placeholder="Casa amarilla, 2do piso..."
+                  <input type="text" value={form.delivery_reference} onChange={e => setForm({ ...form, delivery_reference: e.target.value })} placeholder="Casa amarilla..."
                     className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
                 </div>
                 <div>
