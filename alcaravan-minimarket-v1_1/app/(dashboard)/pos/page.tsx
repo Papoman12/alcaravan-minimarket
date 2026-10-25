@@ -6,6 +6,204 @@ import { useCartStore } from '@/store/cartStore'
 import { formatCurrency } from '@/lib/utils'
 import type { Product, Customer, CartPayment, PaymentMethod, CartItem } from '@/types/database'
 
+// ─── Datos del recibo ────────────────────────────────────────────────
+interface ReceiptData {
+  saleNumber: string
+  date: Date
+  items: {
+    product_name: string
+    quantity: number
+    unit_price: number
+    total: number
+  }[]
+  subtotal: number
+  discount: number
+  tax: number
+  total: number
+  payments: CartPayment[]
+  customerName?: string
+  notes?: string
+}
+
+// ─── Componente: Recibo / Ticket ─────────────────────────────────────
+function ReceiptModal({ receipt, onClose }: { receipt: ReceiptData; onClose: () => void }) {
+  const cashPayment = receipt.payments.find((p) => p.method === 'cash')
+  const change = cashPayment?.received
+    ? cashPayment.received - cashPayment.amount
+    : 0
+
+  const PAYMENT_LABELS: Record<string, string> = {
+    cash: 'Efectivo',
+    card_debit: 'Débito',
+    card_credit: 'Crédito',
+    transfer: 'Transferencia',
+    nequi: 'Nequi',
+    daviplata: 'Daviplata',
+    bancolombia: 'Bancolombia',
+    other: 'Otro',
+  }
+
+  function handlePrint() {
+    window.print()
+  }
+
+  return (
+    <>
+      {/* Estilos de impresión: oculta todo excepto el ticket */}
+      <style>{`
+        @media print {
+          body > * { display: none !important; }
+          .print-receipt {
+            display: block !important;
+            position: fixed !important;
+            top: 0; left: 0;
+            width: 80mm;
+            font-size: 12px;
+            font-family: monospace;
+            color: #000;
+            background: #fff;
+            z-index: 9999;
+          }
+          .no-print { display: none !important; }
+        }
+      `}</style>
+
+      <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm flex flex-col max-h-[90vh]">
+          {/* Encabezado modal */}
+          <div className="px-5 py-4 border-b border-stone-100 flex items-center justify-between no-print">
+            <div>
+              <h3 className="font-bold text-stone-800 text-lg">✅ Venta registrada</h3>
+              <p className="text-stone-500 text-sm">{receipt.saleNumber}</p>
+            </div>
+            <button
+              onClick={onClose}
+              className="w-8 h-8 rounded-xl bg-stone-100 hover:bg-stone-200 flex items-center justify-center text-stone-500 transition-colors"
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Ticket imprimible */}
+          <div className="print-receipt flex-1 overflow-y-auto p-4">
+            {/* Cabecera tienda */}
+            <div className="text-center border-b border-dashed border-stone-300 pb-3 mb-3">
+              <p className="font-bold text-lg tracking-wide">ALCARAVÁN</p>
+              <p className="text-xs text-stone-500">Minimarket &amp; Cafetería</p>
+              <p className="text-xs text-stone-400 mt-1">
+                {receipt.date.toLocaleDateString('es-CO', {
+                  day: '2-digit', month: 'long', year: 'numeric'
+                })}{' '}
+                {receipt.date.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}
+              </p>
+              <p className="text-xs font-mono font-bold mt-1">{receipt.saleNumber}</p>
+              {receipt.customerName && (
+                <p className="text-xs text-stone-500 mt-0.5">Cliente: {receipt.customerName}</p>
+              )}
+            </div>
+
+            {/* Ítems */}
+            <table className="w-full text-xs mb-3">
+              <thead>
+                <tr className="border-b border-stone-200">
+                  <th className="text-left py-1 font-semibold text-stone-600">Producto</th>
+                  <th className="text-center py-1 font-semibold text-stone-600 w-8">Cant</th>
+                  <th className="text-right py-1 font-semibold text-stone-600 w-20">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {receipt.items.map((item, i) => (
+                  <tr key={i} className="border-b border-stone-50">
+                    <td className="py-1.5 text-stone-800 leading-tight">{item.product_name}</td>
+                    <td className="py-1.5 text-center text-stone-600">{item.quantity}</td>
+                    <td className="py-1.5 text-right font-medium text-stone-800">
+                      {formatCurrency(item.total)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {/* Totales */}
+            <div className="border-t border-dashed border-stone-300 pt-2 space-y-1 text-xs">
+              <div className="flex justify-between text-stone-600">
+                <span>Subtotal</span>
+                <span>{formatCurrency(receipt.subtotal)}</span>
+              </div>
+              {receipt.discount > 0 && (
+                <div className="flex justify-between text-emerald-600">
+                  <span>Descuento</span>
+                  <span>- {formatCurrency(receipt.discount)}</span>
+                </div>
+              )}
+              {receipt.tax > 0 && (
+                <div className="flex justify-between text-stone-500">
+                  <span>IVA</span>
+                  <span>{formatCurrency(receipt.tax)}</span>
+                </div>
+              )}
+              <div className="flex justify-between font-bold text-sm text-stone-800 border-t border-stone-300 pt-1 mt-1">
+                <span>TOTAL</span>
+                <span>{formatCurrency(receipt.total)}</span>
+              </div>
+            </div>
+
+            {/* Pagos */}
+            <div className="border-t border-dashed border-stone-300 pt-2 mt-2 space-y-1 text-xs">
+              {receipt.payments.map((p, i) => (
+                <div key={i} className="flex justify-between text-stone-600">
+                  <span>{PAYMENT_LABELS[p.method] ?? p.method}</span>
+                  <span>{formatCurrency(p.amount)}</span>
+                </div>
+              ))}
+              {cashPayment?.received && cashPayment.received > 0 && (
+                <div className="flex justify-between text-stone-500">
+                  <span>Recibido</span>
+                  <span>{formatCurrency(cashPayment.received)}</span>
+                </div>
+              )}
+              {change > 0 && (
+                <div className="flex justify-between font-bold text-emerald-700">
+                  <span>Cambio</span>
+                  <span>{formatCurrency(change)}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Notas */}
+            {receipt.notes && (
+              <p className="text-xs text-stone-400 mt-2 text-center border-t border-dashed border-stone-200 pt-2">
+                {receipt.notes}
+              </p>
+            )}
+
+            {/* Pie */}
+            <div className="text-center mt-3 pt-2 border-t border-dashed border-stone-300">
+              <p className="text-xs text-stone-400">¡Gracias por su compra!</p>
+            </div>
+          </div>
+
+          {/* Botones */}
+          <div className="px-4 pb-4 pt-2 flex gap-3 no-print">
+            <button
+              onClick={onClose}
+              className="flex-1 py-2.5 rounded-xl border border-stone-200 text-stone-600 hover:bg-stone-50 font-medium transition-colors"
+            >
+              Cerrar
+            </button>
+            <button
+              onClick={handlePrint}
+              className="flex-1 py-2.5 rounded-xl bg-amber-700 text-white font-bold hover:bg-amber-800 transition-colors shadow-lg shadow-amber-700/25"
+            >
+              🖨️ Imprimir
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
+
 // ─── Componente: Buscador de productos ──────────────────────────────
 function ProductSearch({
   onSelect,
@@ -353,8 +551,7 @@ export default function POSPage() {
   } = useCartStore()
 
   const [showPayment, setShowPayment] = useState(false)
-  const [showSuccess, setShowSuccess] = useState(false)
-  const [lastSaleNumber, setLastSaleNumber] = useState('')
+  const [saleReceipt, setSaleReceipt] = useState<ReceiptData | null>(null)
   const [saleError, setSaleError] = useState('')
 
   // Foco automático en el buscador
@@ -377,6 +574,15 @@ export default function POSPage() {
     try {
       setSaleError('')
 
+      // Capturar los datos del carrito ANTES de limpiar
+      const cartItems = [...items]
+      const cartSubtotal = getSubtotal()
+      const cartDiscount = getDiscountAmount()
+      const cartTax = getTaxAmount()
+      const cartTotal = getTotal()
+      const cartCustomer = customer
+      const cartNotes = notes
+
       // Crear número de venta
       const saleNumber = 'V' + Date.now().toString().slice(-8)
 
@@ -384,13 +590,13 @@ export default function POSPage() {
         .from('sales')
         .insert({
           sale_number: saleNumber,
-          customer_id: customer?.id ?? null,
-          subtotal: getSubtotal(),
-          discount_amount: getDiscountAmount(),
-          tax_amount: getTaxAmount(),
-          total: getTotal(),
+          customer_id: cartCustomer?.id ?? null,
+          subtotal: cartSubtotal,
+          discount_amount: cartDiscount,
+          tax_amount: cartTax,
+          total: cartTotal,
           status: 'completed',
-          notes: notes || null,
+          notes: cartNotes || null,
         })
         .select()
         .single()
@@ -398,7 +604,7 @@ export default function POSPage() {
       if (saleError || !sale) throw saleError ?? new Error('Error al crear venta')
 
       // Insertar ítems
-      const saleItems = items.map((i) => ({
+      const saleItems = cartItems.map((i) => ({
         sale_id: sale.id,
         product_id: i.product.id,
         product_name: i.product.name,
@@ -429,15 +635,28 @@ export default function POSPage() {
 
       await supabase.from('sale_payments').insert(salePayments)
 
-      setLastSaleNumber(saleNumber)
-      setShowPayment(false)
-      setShowSuccess(true)
+      // Limpiar carrito
       clearCart()
+      setShowPayment(false)
 
-      setTimeout(() => {
-        setShowSuccess(false)
-        searchRef.current?.focus()
-      }, 3000)
+      // Preparar y mostrar recibo
+      setSaleReceipt({
+        saleNumber,
+        date: new Date(),
+        items: cartItems.map((i) => ({
+          product_name: i.product.name,
+          quantity: i.quantity,
+          unit_price: i.unit_price,
+          total: i.total,
+        })),
+        subtotal: cartSubtotal,
+        discount: cartDiscount,
+        tax: cartTax,
+        total: cartTotal,
+        payments,
+        customerName: cartCustomer?.name,
+        notes: cartNotes,
+      })
     } catch (err) {
       console.error(err)
       setSaleError('Error al registrar la venta. Intenta de nuevo.')
@@ -497,29 +716,17 @@ export default function POSPage() {
           <div>
             <h3 className="font-bold text-stone-800">Carrito</h3>
             {customer && (
-              <p className="text-xs text-emerald-600 font-medium">{customer.full_name}</p>
+              <p className="text-xs text-stone-500">{customer.name}</p>
             )}
           </div>
-          <div className="flex gap-1">
+          {items.length > 0 && (
             <button
-              onClick={() => suspendCart()}
-              disabled={items.length === 0}
-              className="p-2 rounded-lg text-stone-500 hover:bg-stone-200 disabled:opacity-30 transition-colors text-sm"
-              title="Suspender venta"
+              onClick={suspendCart}
+              className="text-xs px-3 py-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-600 transition-colors"
             >
-              ⏸
+              ⏸ Suspender
             </button>
-            <button
-              onClick={() => {
-                if (items.length > 0 && confirm('¿Vaciar el carrito?')) clearCart()
-              }}
-              disabled={items.length === 0}
-              className="p-2 rounded-lg text-stone-500 hover:bg-red-50 hover:text-red-500 disabled:opacity-30 transition-colors text-sm"
-              title="Limpiar carrito"
-            >
-              🗑
-            </button>
-          </div>
+          )}
         </div>
 
         {/* Ítems */}
@@ -598,17 +805,15 @@ export default function POSPage() {
         />
       )}
 
-      {/* Toast de éxito */}
-      {showSuccess && (
-        <div className="fixed bottom-6 right-6 bg-emerald-700 text-white rounded-2xl shadow-2xl px-6 py-4 z-50 animate-fade-in">
-          <div className="flex items-center gap-3">
-            <span className="text-2xl">✅</span>
-            <div>
-              <p className="font-bold">¡Venta registrada!</p>
-              <p className="text-sm opacity-80">{lastSaleNumber}</p>
-            </div>
-          </div>
-        </div>
+      {/* Modal de recibo / ticket */}
+      {saleReceipt && (
+        <ReceiptModal
+          receipt={saleReceipt}
+          onClose={() => {
+            setSaleReceipt(null)
+            searchRef.current?.focus()
+          }}
+        />
       )}
     </div>
   )
