@@ -8,76 +8,64 @@ export async function POST(req: NextRequest) {
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
     if (!serviceKey) {
       return NextResponse.json(
-        { error: 'Falta la variable SUPABASE_SERVICE_ROLE_KEY en Vercel' },
+        { error: 'Falta la variable SUPABASE_SERVICE_ROLE_KEY en Vercel. Ve a Vercel → Settings → Environment Variables y agrégala.' },
         { status: 500 }
       )
     }
 
     const body = await req.json()
-    const { email, password, full_name, phone, role_name } = body
+    const { email, password, full_name, phone, role_id } = body
 
-    if (!email || !password || !full_name || !role_name) {
+    if (!email || !password || !full_name || !role_id) {
       return NextResponse.json(
-        { error: 'Faltan campos obligatorios: email, password, full_name, role_name' },
+        { error: 'Faltan campos obligatorios' },
         { status: 400 }
       )
     }
 
-    // Cliente admin con service role
     const supabaseAdmin = createClient(SUPABASE_URL, serviceKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     })
 
-    // 1. Buscar el role_id según el nombre del rol
-    const { data: roleData, error: roleErr } = await supabaseAdmin
-      .from('roles')
-      .select('id')
-      .eq('name', role_name)
-      .single()
-
-    if (roleErr || !roleData) {
-      return NextResponse.json(
-        { error: `Rol "${role_name}" no encontrado en la tabla roles` },
-        { status: 400 }
-      )
-    }
-
-    const role_id = roleData.id
-
-    // 2. Crear usuario en Supabase Auth
+    // 1. Crear usuario en Supabase Auth
     const { data: authData, error: authErr } = await supabaseAdmin.auth.admin.createUser({
       email,
       password,
       email_confirm: true,
-      user_metadata: { full_name, role: role_name },
+      user_metadata: { full_name },
     })
 
     if (authErr || !authData?.user) {
       return NextResponse.json(
-        { error: authErr?.message ?? 'Error al crear usuario en Auth' },
+        { error: authErr?.message ?? 'Error al crear usuario' },
         { status: 400 }
       )
     }
 
     const userId = authData.user.id
 
-    // 3. Insertar en la tabla users con role_id correcto
-    const { error: dbErr } = await supabaseAdmin.from('users').upsert({
-      id: userId,
-      email,
-      full_name,
-      phone: phone?.trim() || null,
-      role_id,
-      is_active: true,
-    })
+    // 2. Esperar un momento para que el trigger cree la fila en public.users
+    await new Promise(r => setTimeout(r, 800))
 
-    if (dbErr) {
-      // Si falla el insert en users, eliminar el auth user para no dejar inconsistencia
-      await supabaseAdmin.auth.admin.deleteUser(userId)
-      return NextResponse.json(
-        { error: 'Error al guardar en tabla users: ' + dbErr.message },
-        { status: 500 }
-      )
+    // 3. Actualizar role_id (el trigger ya debió crear la fila)
+    const { error: updateErr } = await supabaseAdmin
+      .from('users')
+      .update({ role_id, is_active: true })
+      .eq('id', userId)
+
+    if (updateErr) {
+      // Si no existe la fila todavía, insertarla
+      const { error: insertErr } = await supabaseAdmin
+        .from('users')
+        .insert({ id: userId, role_id, is_active: true })
+
+      if (insertErr) {
+        return NextResponse.json({
+          success: true,
+          userId,
+          warning: 'Usuario creado pero no se pudo asignar rol: ' + insertErr.message,
+        })
+      }
     }
 
     return NextResponse.json({ success: true, userId })
