@@ -246,114 +246,62 @@ export default function ClientesPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-stone-700 mb-1">Nombre *</label>
-                  <input
-                    type="text"
-                    value={form.first_name}
-                    onChange={e => setForm({ ...form, first_name: e.target.value })}
-                    placeholder="Nombre"
-                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700"
-                  />
+                  <input type="text" value={form.first_name} onChange={e => setForm({ ...form, first_name: e.target.value })} placeholder="Nombre"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-stone-700 mb-1">Apellido</label>
-                  <input
-                    type="text"
-                    value={form.last_name}
-                    onChange={e => setForm({ ...form, last_name: e.target.value })}
-                    placeholder="Apellido"
-                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700"
-                  />
+                  <input type="text" value={form.last_name} onChange={e => setForm({ ...form, last_name: e.target.value })} placeholder="Apellido"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-stone-700 mb-1">Tipo documento</label>
-                  <select
-                    value={form.document_type}
-                    onChange={e => setForm({ ...form, document_type: e.target.value })}
-                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700"
-                  >
+                  <select value={form.document_type} onChange={e => setForm({ ...form, document_type: e.target.value })}
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700">
                     {DOC_TYPES.map(d => <option key={d} value={d}>{d}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-stone-700 mb-1">Número documento</label>
-                  <input
-                    type="text"
-                    value={form.document_number}
-                    onChange={e => setForm({ ...form, document_number: e.target.value })}
-                    placeholder="Ej: 12345678"
-                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700"
-                  />
+                  <input type="text" value={form.document_number} onChange={e => setForm({ ...form, document_number: e.target.value })} placeholder="Ej: 12345678"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-stone-700 mb-1">Teléfono</label>
-                  <input
-                    type="tel"
-                    value={form.phone}
-                    onChange={e => setForm({ ...form, phone: e.target.value })}
-                    placeholder="300 000 0000"
-                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700"
-                  />
+                  <input type="tel" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="300 000 0000"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-stone-700 mb-1">WhatsApp</label>
-                  <input
-                    type="tel"
-                    value={form.whatsapp}
-                    onChange={e => setForm({ ...form, whatsapp: e.target.value })}
-                    placeholder="300 000 0000"
-                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700"
-                  />
+                  <input type="tel" value={form.whatsapp} onChange={e => setForm({ ...form, whatsapp: e.target.value })} placeholder="300 000 0000"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
                 </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-stone-700 mb-1">Correo electrónico</label>
-                <input
-                  type="email"
-                  value={form.email}
-                  onChange={e => setForm({ ...form, email: e.target.value })}
-                  placeholder="correo@ejemplo.com"
-                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700"
-                />
+                <input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="correo@ejemplo.com"
+                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-stone-700 mb-1">Dirección</label>
-                  <input
-                    type="text"
-                    value={form.address}
-                    onChange={e => setForm({ ...form, address: e.target.value })}
-                    placeholder="Calle 1 # 2-3"
-                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700"
-                  />
+                  <input type="text" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} placeholder="Calle 1 # 2-3"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-stone-700 mb-1">Ciudad</label>
-                  <input
-                    type="text"
-                    value={form.city}
-                    onChange={e => setForm({ ...form, city: e.target.value })}
-                    placeholder="Ciudad"
-                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700"
-                  />
+                  <input type="text" value={form.city} onChange={e => setForm({ ...form, city: e.target.value })} placeholder="Ciudad"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
                 </div>
               </div>
             </div>
             <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => setShowModal(false)}
-                className="flex-1 py-2.5 border border-stone-200 rounded-xl text-stone-600 hover:bg-stone-50"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="flex-1 py-2.5 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 disabled:bg-stone-300"
-              >
+              <button onClick={() => setShowModal(false)} className="flex-1 py-2.5 border border-stone-200 rounded-xl text-stone-600 hover:bg-stone-50">Cancelar</button>
+              <button onClick={handleSave} disabled={saving} className="flex-1 py-2.5 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 disabled:bg-stone-300">
                 {saving ? 'Guardando...' : editing ? 'Actualizar' : 'Guardar'}
               </button>
             </div>
