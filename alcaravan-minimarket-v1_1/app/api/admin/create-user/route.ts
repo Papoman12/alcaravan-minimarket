@@ -1,53 +1,90 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
 const SUPABASE_URL = 'https://wmufsliuuvfombbegzbc.supabase.co'
 
-export async function POST(request: Request) {
+export async function POST(req: NextRequest) {
   try {
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-    if (!serviceKey || serviceKey === 'TU_SERVICE_ROLE_KEY') {
-      return NextResponse.json({ error: 'Service role key no configurada en Vercel. Ve a Settings → Environment Variables y agrega SUPABASE_SERVICE_ROLE_KEY.' }, { status: 500 })
+    if (!serviceKey) {
+      return NextResponse.json(
+        { error: 'Falta la variable SUPABASE_SERVICE_ROLE_KEY en Vercel' },
+        { status: 500 }
+      )
     }
 
+    const body = await req.json()
+    const { email, password, full_name, phone, role_name } = body
+
+    if (!email || !password || !full_name || !role_name) {
+      return NextResponse.json(
+        { error: 'Faltan campos obligatorios: email, password, full_name, role_name' },
+        { status: 400 }
+      )
+    }
+
+    // Cliente admin con service role
     const supabaseAdmin = createClient(SUPABASE_URL, serviceKey, {
-      auth: { autoRefreshToken: false, persistSession: false }
+      auth: { autoRefreshToken: false, persistSession: false },
     })
 
-    const { email, password, full_name, phone, role } = await request.json()
+    // 1. Buscar el role_id según el nombre del rol
+    const { data: roleData, error: roleErr } = await supabaseAdmin
+      .from('roles')
+      .select('id')
+      .eq('name', role_name)
+      .single()
 
-    if (!email || !password || !full_name) {
-      return NextResponse.json({ error: 'Email, contraseña y nombre son requeridos' }, { status: 400 })
+    if (roleErr || !roleData) {
+      return NextResponse.json(
+        { error: `Rol "${role_name}" no encontrado en la tabla roles` },
+        { status: 400 }
+      )
     }
 
-    if (password.length < 6) {
-      return NextResponse.json({ error: 'La contraseña debe tener mínimo 6 caracteres' }, { status: 400 })
-    }
+    const role_id = roleData.id
 
-    // Crear usuario en Auth
-    const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.createUser({
+    // 2. Crear usuario en Supabase Auth
+    const { data: authData, error: authErr } = await supabaseAdmin.auth.admin.createUser({
       email,
       password,
       email_confirm: true,
-      user_metadata: { full_name, role },
+      user_metadata: { full_name, role: role_name },
     })
 
-    if (authError) {
-      return NextResponse.json({ error: authError.message }, { status: 400 })
+    if (authErr || !authData?.user) {
+      return NextResponse.json(
+        { error: authErr?.message ?? 'Error al crear usuario en Auth' },
+        { status: 400 }
+      )
     }
 
-    // Insertar en tabla users
-    await supabaseAdmin.from('users').upsert({
-      id: authUser.user.id,
+    const userId = authData.user.id
+
+    // 3. Insertar en la tabla users con role_id correcto
+    const { error: dbErr } = await supabaseAdmin.from('users').upsert({
+      id: userId,
       email,
       full_name,
-      phone: phone || null,
-      role: role ?? 'cashier',
+      phone: phone?.trim() || null,
+      role_id,
       is_active: true,
     })
 
-    return NextResponse.json({ success: true, id: authUser.user.id })
+    if (dbErr) {
+      // Si falla el insert en users, eliminar el auth user para no dejar inconsistencia
+      await supabaseAdmin.auth.admin.deleteUser(userId)
+      return NextResponse.json(
+        { error: 'Error al guardar en tabla users: ' + dbErr.message },
+        { status: 500 }
+      )
+    }
+
+    return NextResponse.json({ success: true, userId })
   } catch (err: any) {
-    return NextResponse.json({ error: err.message ?? 'Error desconocido' }, { status: 500 })
+    return NextResponse.json(
+      { error: err.message ?? 'Error inesperado' },
+      { status: 500 }
+    )
   }
 }
