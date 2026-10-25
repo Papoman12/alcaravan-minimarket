@@ -23,11 +23,13 @@ const pageTitles: Record<string, string> = {
   '/domicilios': 'Domicilios',
   '/promociones': 'Promociones',
   '/ai': 'Alcaraván AI',
+  '/usuarios': 'Usuarios',
 }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
+  const [userRole, setUserRole] = useState<string>('cajero')
   const pathname = usePathname()
   const router = useRouter()
   const title = pageTitles[pathname] ?? 'Alcaraván'
@@ -41,6 +43,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           window.location.href = '/login'
           return
         }
+
+        // Obtener rol del usuario
+        const { data: userData } = await supabase
+          .from('users')
+          .select('roles(name)')
+          .eq('id', user.id)
+          .single()
+
+        const rol = (userData as any)?.roles?.name ?? 'cajero'
+        setUserRole(rol)
         setAuthChecked(true)
       } catch {
         window.location.href = '/login'
@@ -64,7 +76,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <div className="flex h-screen overflow-hidden bg-stone-50">
       {/* Sidebar desktop */}
       <div className="hidden lg:flex lg:w-60 lg:flex-shrink-0">
-        <Sidebar />
+        <Sidebar userRole={userRole} />
       </div>
 
       {/* Sidebar móvil — overlay */}
@@ -75,7 +87,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             onClick={() => setSidebarOpen(false)}
           />
           <div className="fixed left-0 top-0 bottom-0 w-72 z-50 lg:hidden animate-slide-in">
-            <Sidebar onClose={() => setSidebarOpen(false)} />
+            <Sidebar userRole={userRole} onClose={() => setSidebarOpen(false)} />
           </div>
         </>
       )}
