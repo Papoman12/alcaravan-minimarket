@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 
@@ -16,6 +16,7 @@ const navItems: NavItem[] = [
   { href: '/',             icon: '🏠', label: 'Dashboard' },
   { href: '/pos',          icon: '🛒', label: 'Punto de Venta' },
   { href: '/caja',         icon: '💰', label: 'Caja' },
+  { href: '/ventas',       icon: '🧾', label: 'Ventas' },
   { href: '/clientes',     icon: '👥', label: 'Clientes' },
   { href: '/productos',    icon: '📦', label: 'Productos' },
   { href: '/inventario',   icon: '📊', label: 'Inventario' },
@@ -34,18 +35,18 @@ const navItems: NavItem[] = [
 
 // admin (o cualquier rol no listado) ve TODO
 const PERMISOS: Record<string, string[]> = {
-  cajero: ['/', '/caja', '/pos', '/clientes'],
-  bodega: ['/', '/productos', '/inventario', '/compras', '/proveedores'],
-  inventario: ['/', '/productos', '/inventario', '/compras', '/proveedores'],
+  cajero:    ['/', '/pos', '/caja', '/ventas', '/clientes'],
+  bodega:    ['/', '/productos', '/inventario', '/compras', '/proveedores'],
+  inventario:['/', '/productos', '/inventario', '/compras', '/proveedores'],
 }
 
 function getRutas(rol: string): string[] | null {
-  return PERMISOS[rol.toLowerCase()] ?? null
+  return PERMISOS[rol.toLowerCase()] ?? null // null = admin = ve todo
 }
 
 export default function Sidebar({
   onClose,
-  userRole = 'cajero',
+  userRole = 'admin',
 }: {
   onClose?: () => void
   userRole?: string
