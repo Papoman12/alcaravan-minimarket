@@ -46,11 +46,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         }
         const { data: userData } = await supabase
           .from('users')
-          .select('role_id, roles(name)')
+          .select('role')
           .eq('id', user.id)
           .single()
-        // Si no tiene role_id asignado → tratar como admin (ve todo)
-        const rol = (userData as any)?.roles?.name ?? 'admin'
+        // Si no tiene role asignado → tratar como admin (ve todo)
+        const rol = (userData as any)?.role ?? 'admin'
         setUserRole(rol)
         setAuthChecked(true)
       } catch {
