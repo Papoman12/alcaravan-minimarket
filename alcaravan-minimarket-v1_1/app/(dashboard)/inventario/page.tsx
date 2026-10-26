@@ -9,7 +9,7 @@ interface Product {
   name: string
   code?: string
   barcode?: string
-  cost_price: number
+  purchase_price: number
   sale_price: number
   stock: number
   min_stock?: number
@@ -28,7 +28,7 @@ function downloadCSV(products: Product[]) {
   const BOM = '﻿' // Para que Excel abra correctamente con tildes
   const headers = ['Nombre', 'Código', 'Código de Barras', 'Categoría', 'Unidad', 'Stock', 'Stock Mínimo', 'Precio Costo', 'Precio Venta', 'Margen %', 'Estado']
   const rows = products.map(p => {
-    const margen = p.cost_price > 0 ? (((p.sale_price - p.cost_price) / p.cost_price) * 100).toFixed(1) : '0'
+    const margen = p.purchase_price > 0 ? (((p.sale_price - p.purchase_price) / p.purchase_price) * 100).toFixed(1) : '0'
     return [
       p.name,
       p.code ?? '',
@@ -37,7 +37,7 @@ function downloadCSV(products: Product[]) {
       p.unit?.abbreviation ?? '',
       p.stock,
       p.min_stock ?? '',
-      p.cost_price,
+      p.purchase_price,
       p.sale_price,
       margen,
       p.is_active ? 'Activo' : 'Inactivo',
@@ -71,7 +71,7 @@ export default function InventarioPage() {
       const supabase = createClient()
       const { data } = await supabase
         .from('products')
-        .select('id, name, code, barcode, cost_price, sale_price, stock, min_stock, is_active, category:categories(name), unit:units_of_measure(abbreviation)')
+        .select('id, name, code, barcode, purchase_price, sale_price, stock, min_stock, is_active, category:categories(name), unit:units_of_measure(abbreviation)')
         .order('name')
         .limit(500)
       const rows = (data ?? []) as unknown as Product[]
@@ -97,7 +97,7 @@ export default function InventarioPage() {
   const totalProductos = products.length
   const agotados = products.filter(p => p.stock <= 0).length
   const stockBajo = products.filter(p => p.min_stock && p.stock <= p.min_stock && p.stock > 0).length
-  const valorInventario = products.reduce((s, p) => s + p.cost_price * p.stock, 0)
+  const valorInventario = products.reduce((s, p) => s + p.purchase_price * p.stock, 0)
   const valorVenta = products.reduce((s, p) => s + p.sale_price * p.stock, 0)
 
   return (
@@ -203,8 +203,8 @@ export default function InventarioPage() {
           <div className="divide-y divide-stone-100">
             {filtered.map(p => {
               const status = getStockStatus(p)
-              const margen = p.cost_price > 0
-                ? (((p.sale_price - p.cost_price) / p.cost_price) * 100).toFixed(0)
+              const margen = p.purchase_price > 0
+                ? (((p.sale_price - p.purchase_price) / p.purchase_price) * 100).toFixed(0)
                 : null
               return (
                 <div
@@ -225,7 +225,7 @@ export default function InventarioPage() {
                     <span className="text-xs text-stone-400 ml-1">{p.unit?.abbreviation ?? ''}</span>
                   </div>
                   <span className="text-center text-xs text-stone-400">{p.min_stock ?? '—'}</span>
-                  <span className="text-right text-sm text-stone-600">{formatCurrency(p.cost_price)}</span>
+                  <span className="text-right text-sm text-stone-600">{formatCurrency(p.purchase_price)}</span>
                   <div className="text-right">
                     <p className="text-sm font-semibold text-stone-800">{formatCurrency(p.sale_price)}</p>
                     {margen && <p className="text-[10px] text-emerald-600">+{margen}%</p>}
