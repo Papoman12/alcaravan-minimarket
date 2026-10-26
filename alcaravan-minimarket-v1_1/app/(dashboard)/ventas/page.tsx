@@ -126,7 +126,8 @@ function SaleDetailModal({
         .total{font-size:14px;font-weight:bold;display:flex;justify-content:space-between;margin-top:6px;}
       </style>
     </head><body>
-      <h2>Alcaraván Minimarket - Café</h2>
+      <h2>Alcaraván 
+      Minimarket - Café</h2>
       <div class="sub"><br>${formatDate(sale.created_at)}<br><b>${sale.sale_number}</b></div>
       ${sale.customers ? `<div style="font-size:11px;margin-bottom:4px;">Cliente: <b>${getCustomerName(sale.customers)}</b></div>` : ''}
       <table>
