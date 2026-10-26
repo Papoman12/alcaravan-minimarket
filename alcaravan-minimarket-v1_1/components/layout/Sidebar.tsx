@@ -23,14 +23,12 @@ const navItems: NavItem[] = [
   { href: '/compras',      icon: '🧾', label: 'Compras' },
   { href: '/proveedores',  icon: '🏭', label: 'Proveedores' },
   { href: '/cafeteria',    icon: '☕', label: 'Cafetería',   phase: 3 },
-  { href: '/produccion',   icon: '👨‍🍳', label: 'Producción',  phase: 3 },
   { href: '/domicilios',   icon: '🚚', label: 'Domicilios',  phase: 4 },
   { href: '/promociones',  icon: '🎁', label: 'Promociones', phase: 4 },
   { href: '/gastos',       icon: '💳', label: 'Gastos' },
   { href: '/reportes',     icon: '📈', label: 'Reportes' },
   { href: '/usuarios',     icon: '👤', label: 'Usuarios' },
   { href: '/configuracion',icon: '⚙️', label: 'Configuración' },
-  { href: '/ai',           icon: '🤖', label: 'Alcaraván AI', phase: 5 },
 ]
 
 // admin (o cualquier rol no listado) ve TODO
