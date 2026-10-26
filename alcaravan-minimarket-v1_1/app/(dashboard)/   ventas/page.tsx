@@ -281,6 +281,15 @@ function SaleDetailModal({
 }
 
 // ─── Modal editar venta ──────────────────────────────────────────────
+interface CustomerResult {
+  id: string
+  full_name?: string
+  first_name: string
+  last_name?: string
+  phone?: string
+  document_number?: string
+}
+
 function EditSaleModal({
   sale,
   onClose,
@@ -298,6 +307,35 @@ function EditSaleModal({
   const [newAmount, setNewAmount] = useState('')
   const [newRef, setNewRef] = useState('')
   const [addingPayment, setAddingPayment] = useState(false)
+  // Cliente
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerResult | null>(
+    sale.customers ? { id: sale.customers.id, first_name: sale.customers.first_name, last_name: sale.customers.last_name, full_name: sale.customers.full_name, phone: sale.customers.phone } : null
+  )
+  const [customerSearch, setCustomerSearch] = useState('')
+  const [customerResults, setCustomerResults] = useState<CustomerResult[]>([])
+  const [searchingCustomer, setSearchingCustomer] = useState(false)
+
+  useEffect(() => {
+    if (!customerSearch.trim() || customerSearch.length < 2) { setCustomerResults([]); return }
+    const timer = setTimeout(async () => {
+      setSearchingCustomer(true)
+      const supabase = createClient()
+      const q = customerSearch.toLowerCase()
+      const { data } = await supabase
+        .from('customers')
+        .select('id, first_name, last_name, full_name, phone, document_number')
+        .or(`full_name.ilike.%${q}%,first_name.ilike.%${q}%,phone.ilike.%${q}%,document_number.ilike.%${q}%`)
+        .eq('is_active', true)
+        .limit(5)
+      setCustomerResults((data ?? []) as CustomerResult[])
+      setSearchingCustomer(false)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [customerSearch])
+
+  function getCustomerDisplayName(c: CustomerResult) {
+    return c.full_name || [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Sin nombre'
+  }
 
   const METHODS = [
     { key: 'cash',        label: '💵 Efectivo' },
@@ -318,7 +356,7 @@ function EditSaleModal({
     const supabase = createClient()
     const { error: err } = await supabase
       .from('sales')
-      .update({ status })
+      .update({ status, customer_id: selectedCustomer?.id ?? null })
       .eq('id', sale.id)
     if (err) { setError('Error al guardar: ' + err.message); setSaving(false); return }
     setSaving(false)
@@ -373,6 +411,49 @@ function EditSaleModal({
 
         <div className="p-5 space-y-5">
           {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-3 py-2 text-sm">{error}</div>}
+
+          {/* Cliente */}
+          <div>
+            <p className="text-sm font-semibold text-stone-700 mb-2">Cliente</p>
+            {selectedCustomer ? (
+              <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+                <span className="text-xl">👤</span>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-stone-800 text-sm">{getCustomerDisplayName(selectedCustomer)}</p>
+                  {selectedCustomer.phone && <p className="text-xs text-stone-500">{selectedCustomer.phone}</p>}
+                </div>
+                <button onClick={() => { setSelectedCustomer(null); setCustomerSearch('') }}
+                  className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50">
+                  ✕ Quitar
+                </button>
+              </div>
+            ) : (
+              <div className="relative">
+                <input
+                  type="text"
+                  value={customerSearch}
+                  onChange={e => setCustomerSearch(e.target.value)}
+                  placeholder="Buscar cliente por nombre o teléfono..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700 text-sm"
+                />
+                {searchingCustomer && <div className="absolute right-3 top-3 w-4 h-4 border-2 border-amber-700 border-t-transparent rounded-full animate-spin" />}
+                {customerResults.length > 0 && (
+                  <div className="absolute z-10 left-0 right-0 top-full mt-1 bg-white border border-stone-200 rounded-xl shadow-lg overflow-hidden">
+                    {customerResults.map(c => (
+                      <button key={c.id} onClick={() => { setSelectedCustomer(c); setCustomerSearch(''); setCustomerResults([]) }}
+                        className="w-full text-left px-3 py-2.5 hover:bg-amber-50 border-b border-stone-100 last:border-0 transition-colors">
+                        <p className="font-medium text-stone-800 text-sm">{getCustomerDisplayName(c)}</p>
+                        {c.phone && <p className="text-xs text-stone-400">{c.phone}</p>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {customerSearch.length >= 2 && !searchingCustomer && customerResults.length === 0 && (
+                  <p className="text-xs text-stone-400 mt-1 px-1">No se encontraron clientes</p>
+                )}
+              </div>
+            )}
+          </div>
 
           {/* Estado */}
           <div>
