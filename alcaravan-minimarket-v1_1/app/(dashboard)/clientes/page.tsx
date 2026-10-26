@@ -87,10 +87,7 @@ export default function ClientesPage() {
   }
 
   async function handleSave() {
-    if (!form.first_name.trim()) {
-      setError('El nombre es obligatorio')
-      return
-    }
+    if (!form.first_name.trim()) { setError('El nombre es obligatorio'); return }
     setSaving(true)
     setError('')
     const supabase = createClient()
@@ -110,18 +107,13 @@ export default function ClientesPage() {
     }
     if (editing) {
       const { error: err } = await supabase.from('customers').update(payload).eq('id', editing.id)
-      if (err) {
-        setError('Error al actualizar: ' + err.message)
-        setSaving(false); return
-      }
+      if (err) { setError('Error al actualizar: ' + err.message); setSaving(false); return }
     } else {
       const { error: err } = await supabase.from('customers').insert(payload)
       if (err) {
-        if (err.message.includes('unique') || err.message.includes('duplicate')) {
-          setError('Ya existe un cliente con ese número de documento')
-        } else {
-          setError('Error al guardar: ' + err.message)
-        }
+        setError(err.message.includes('unique') || err.message.includes('duplicate')
+          ? 'Ya existe un cliente con ese número de documento'
+          : 'Error al guardar: ' + err.message)
         setSaving(false); return
       }
     }
@@ -151,78 +143,46 @@ export default function ClientesPage() {
             {customers.filter(c => c.is_active).length} activos · {customers.length} total
           </p>
         </div>
-        <button
-          onClick={openNew}
-          className="px-4 py-2 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 transition-colors"
-        >
+        <button onClick={openNew} className="px-4 py-2 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 transition-colors">
           + Nuevo Cliente
         </button>
       </div>
 
       <div className="mb-4">
-        <input
-          type="text"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
+        <input type="text" value={search} onChange={e => setSearch(e.target.value)}
           placeholder="Buscar por nombre, teléfono o documento..."
-          className="w-full px-4 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
-        />
+          className="w-full px-4 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white" />
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-16">
-          <div className="w-8 h-8 border-4 border-amber-700 border-t-transparent rounded-full animate-spin" />
-        </div>
+        <div className="flex justify-center py-16"><div className="w-8 h-8 border-4 border-amber-700 border-t-transparent rounded-full animate-spin" /></div>
       ) : filtered.length === 0 ? (
         <div className="text-center py-16">
           <p className="text-5xl mb-3">👥</p>
-          <p className="text-stone-500">
-            {search ? 'No se encontraron clientes' : 'No hay clientes registrados'}
-          </p>
+          <p className="text-stone-500">{search ? 'No se encontraron clientes' : 'No hay clientes registrados'}</p>
         </div>
       ) : (
         <div className="grid gap-3">
           {filtered.map(c => (
-            <div
-              key={c.id}
-              className={`bg-white rounded-2xl border p-4 flex items-center gap-4 ${c.is_active ? 'border-stone-200' : 'border-stone-100 opacity-60'}`}
-            >
+            <div key={c.id} className={`bg-white rounded-2xl border p-4 flex items-center gap-4 ${c.is_active ? 'border-stone-200' : 'border-stone-100 opacity-60'}`}>
               <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center flex-shrink-0">
-                <span className="text-xl font-bold text-blue-500">
-                  {getDisplayName(c).charAt(0).toUpperCase()}
-                </span>
+                <span className="text-xl font-bold text-blue-500">{getDisplayName(c).charAt(0).toUpperCase()}</span>
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <p className="font-semibold text-stone-800">{getDisplayName(c)}</p>
-                  {!c.is_active && (
-                    <span className="text-xs bg-stone-100 text-stone-500 px-2 py-0.5 rounded-full">Inactivo</span>
-                  )}
-                  {(c.loyalty_points ?? 0) > 0 && (
-                    <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
-                      ⭐ {c.loyalty_points} pts
-                    </span>
-                  )}
+                  {!c.is_active && <span className="text-xs bg-stone-100 text-stone-500 px-2 py-0.5 rounded-full">Inactivo</span>}
+                  {(c.loyalty_points ?? 0) > 0 && <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">⭐ {c.loyalty_points} pts</span>}
                 </div>
                 <div className="flex gap-3 mt-0.5 flex-wrap">
                   {c.phone && <span className="text-sm text-stone-500">📞 {c.phone}</span>}
-                  {c.document_number && (
-                    <span className="text-sm text-stone-500">{c.document_type}: {c.document_number}</span>
-                  )}
+                  {c.document_number && <span className="text-sm text-stone-500">{c.document_type}: {c.document_number}</span>}
                   {c.city && <span className="text-sm text-stone-500">📍 {c.city}</span>}
                 </div>
               </div>
               <div className="flex gap-2 flex-shrink-0">
-                <button
-                  onClick={() => openEdit(c)}
-                  className="px-3 py-1.5 text-sm border border-stone-200 rounded-lg text-stone-600 hover:bg-stone-50"
-                >
-                  Editar
-                </button>
-                <button
-                  onClick={() => toggleActive(c)}
-                  className={`px-3 py-1.5 text-sm rounded-lg font-medium ${c.is_active ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'}`}
-                >
+                <button onClick={() => openEdit(c)} className="px-3 py-1.5 text-sm border border-stone-200 rounded-lg text-stone-600 hover:bg-stone-50">Editar</button>
+                <button onClick={() => toggleActive(c)} className={`px-3 py-1.5 text-sm rounded-lg font-medium ${c.is_active ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'}`}>
                   {c.is_active ? 'Desactivar' : 'Activar'}
                 </button>
               </div>
@@ -234,14 +194,8 @@ export default function ClientesPage() {
       {showModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-lg font-bold text-stone-800 mb-4">
-              {editing ? 'Editar Cliente' : 'Nuevo Cliente'}
-            </h3>
-            {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-3 py-2 text-sm mb-4">
-                {error}
-              </div>
-            )}
+            <h3 className="text-lg font-bold text-stone-800 mb-4">{editing ? 'Editar Cliente' : 'Nuevo Cliente'}</h3>
+            {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-3 py-2 text-sm mb-4">{error}</div>}
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div>
