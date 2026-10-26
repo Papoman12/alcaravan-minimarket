@@ -84,10 +84,12 @@ function SaleDetailModal({
   sale,
   onClose,
   onAddPayment,
+  onEdit,
 }: {
   sale: Sale
   onClose: () => void
   onAddPayment: (sale: Sale) => void
+  onEdit: (sale: Sale) => void
 }) {
   const isPending = sale.status === 'pending'
   const pendingAmount = (sale.pending_amount ?? 0)
@@ -260,12 +262,181 @@ function SaleDetailModal({
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-4 border-t flex gap-3">
-          <button onClick={handlePrint} className="flex-1 py-2.5 border border-stone-200 rounded-xl text-stone-700 font-medium hover:bg-stone-50 flex items-center justify-center gap-2">
-            🖨️ Imprimir
-          </button>
-          <button onClick={onClose} className="flex-1 py-2.5 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800">
+        <div className="px-5 py-4 border-t space-y-2">
+          <div className="flex gap-2">
+            <button onClick={handlePrint} className="flex-1 py-2.5 border border-stone-200 rounded-xl text-stone-700 font-medium hover:bg-stone-50 flex items-center justify-center gap-2">
+              🖨️ Imprimir
+            </button>
+            <button onClick={() => onEdit(sale)} className="flex-1 py-2.5 border-2 border-amber-300 rounded-xl text-amber-700 font-semibold hover:bg-amber-50 flex items-center justify-center gap-2">
+              ✏️ Editar
+            </button>
+          </div>
+          <button onClick={onClose} className="w-full py-2.5 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800">
             Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Modal editar venta ──────────────────────────────────────────────
+function EditSaleModal({
+  sale,
+  onClose,
+  onSaved,
+}: {
+  sale: Sale
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [status, setStatus] = useState(sale.status)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [payments, setPayments] = useState<SalePayment[]>(sale.sale_payments ?? [])
+  const [newMethod, setNewMethod] = useState('cash')
+  const [newAmount, setNewAmount] = useState('')
+  const [newRef, setNewRef] = useState('')
+  const [addingPayment, setAddingPayment] = useState(false)
+
+  const METHODS = [
+    { key: 'cash',        label: '💵 Efectivo' },
+    { key: 'card_debit',  label: '💳 Débito' },
+    { key: 'card_credit', label: '💳 Crédito' },
+    { key: 'transfer',    label: '🏦 Transferencia' },
+    { key: 'nequi',       label: '📱 Nequi' },
+    { key: 'daviplata',   label: '📱 Daviplata' },
+    { key: 'bancolombia', label: '📱 Bancolombia' },
+    { key: 'other',       label: 'Otro' },
+  ]
+
+  const totalPagado = payments.reduce((s, p) => s + p.amount, 0)
+
+  async function handleSave() {
+    setSaving(true)
+    setError('')
+    const supabase = createClient()
+    const { error: err } = await supabase
+      .from('sales')
+      .update({ status })
+      .eq('id', sale.id)
+    if (err) { setError('Error al guardar: ' + err.message); setSaving(false); return }
+    setSaving(false)
+    onSaved()
+  }
+
+  async function handleDeletePayment(paymentId: string) {
+    const supabase = createClient()
+    await supabase.from('sale_payments').delete().eq('id', paymentId)
+    setPayments(payments.filter(p => p.id !== paymentId))
+  }
+
+  async function handleAddPayment() {
+    const amt = parseFloat(newAmount)
+    if (!amt || amt <= 0) return
+    setAddingPayment(true)
+    const supabase = createClient()
+    const { data, error: err } = await supabase
+      .from('sale_payments')
+      .insert({ sale_id: sale.id, payment_method: newMethod, amount: amt, reference: newRef.trim() || null, change_amount: 0 })
+      .select()
+      .single()
+    if (!err && data) {
+      setPayments([...payments, data as SalePayment])
+      setNewAmount('')
+      setNewRef('')
+    }
+    setAddingPayment(false)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="px-5 py-4 border-b flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-stone-800 text-lg">Editar venta</h3>
+            <p className="text-stone-500 text-sm">{sale.sale_number}</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-stone-100 hover:bg-stone-200 flex items-center justify-center text-stone-500">✕</button>
+        </div>
+
+        <div className="p-5 space-y-5">
+          {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-3 py-2 text-sm">{error}</div>}
+
+          {/* Estado */}
+          <div>
+            <p className="text-sm font-semibold text-stone-700 mb-2">Estado de la venta</p>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { key: 'completed', label: '✅ Completada', desc: 'Pago recibido' },
+                { key: 'pending',   label: '🕐 Fiado',      desc: 'Pago pendiente' },
+                { key: 'cancelled', label: '❌ Cancelada',   desc: 'Anulada' },
+                { key: 'returned',  label: '↩️ Devuelta',    desc: 'Devolución' },
+              ].map(s => (
+                <button key={s.key} onClick={() => setStatus(s.key as Sale['status'])}
+                  className={`p-3 rounded-xl border-2 text-left transition-all ${status === s.key ? 'border-amber-700 bg-amber-50' : 'border-stone-200 hover:border-stone-300'}`}>
+                  <p className="font-semibold text-sm text-stone-800">{s.label}</p>
+                  <p className="text-xs text-stone-500">{s.desc}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Pagos actuales */}
+          <div>
+            <p className="text-sm font-semibold text-stone-700 mb-2">
+              Pagos registrados <span className="font-normal text-stone-400">({formatCurrency(totalPagado)} de {formatCurrency(sale.total)})</span>
+            </p>
+            {payments.length === 0 ? (
+              <p className="text-sm text-stone-400 italic">Sin pagos registrados</p>
+            ) : (
+              <div className="space-y-2">
+                {payments.map(p => (
+                  <div key={p.id} className="flex items-center justify-between bg-stone-50 rounded-xl px-3 py-2">
+                    <div>
+                      <p className="text-sm font-medium text-stone-700">{PAYMENT_LABELS[p.payment_method] ?? p.payment_method}</p>
+                      {p.reference && <p className="text-xs text-stone-400">Ref: {p.reference}</p>}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="font-bold text-stone-800">{formatCurrency(p.amount)}</span>
+                      <button onClick={() => handleDeletePayment(p.id)}
+                        className="text-red-400 hover:text-red-600 text-lg leading-none">✕</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Agregar pago */}
+          <div className="bg-stone-50 rounded-xl p-4 space-y-3">
+            <p className="text-sm font-semibold text-stone-700">+ Agregar pago</p>
+            <div className="grid grid-cols-3 gap-1.5">
+              {METHODS.map(m => (
+                <button key={m.key} onClick={() => setNewMethod(m.key)}
+                  className={`py-1.5 rounded-lg text-xs font-medium border transition-all ${newMethod === m.key ? 'bg-amber-700 text-white border-amber-700' : 'border-stone-200 text-stone-600 hover:border-amber-300'}`}>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <input type="number" value={newAmount} onChange={e => setNewAmount(e.target.value)}
+                placeholder="Monto" className="flex-1 px-3 py-2 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700 font-mono" />
+              <input type="text" value={newRef} onChange={e => setNewRef(e.target.value)}
+                placeholder="Referencia" className="flex-1 px-3 py-2 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700 text-sm" />
+              <button onClick={handleAddPayment} disabled={addingPayment || !newAmount}
+                className="px-4 py-2 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 disabled:bg-stone-300">
+                {addingPayment ? '...' : 'Agregar'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="px-5 pb-5 flex gap-3">
+          <button onClick={onClose} className="flex-1 py-2.5 border border-stone-200 rounded-xl text-stone-600 hover:bg-stone-50">Cancelar</button>
+          <button onClick={handleSave} disabled={saving}
+            className="flex-1 py-2.5 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 disabled:bg-stone-300">
+            {saving ? 'Guardando...' : '✓ Guardar cambios'}
           </button>
         </div>
       </div>
@@ -381,6 +552,7 @@ export default function VentasPage() {
   const [dateTo, setDateTo] = useState('')
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null)
   const [payingSale, setPayingSale] = useState<Sale | null>(null)
+  const [editingSale, setEditingSale] = useState<Sale | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -542,6 +714,22 @@ export default function VentasPage() {
           onAddPayment={(sale) => {
             setSelectedSale(null)
             setPayingSale(sale)
+          }}
+          onEdit={(sale) => {
+            setSelectedSale(null)
+            setEditingSale(sale)
+          }}
+        />
+      )}
+
+      {/* Modal editar venta */}
+      {editingSale && (
+        <EditSaleModal
+          sale={editingSale}
+          onClose={() => setEditingSale(null)}
+          onSaved={() => {
+            setEditingSale(null)
+            load()
           }}
         />
       )}
