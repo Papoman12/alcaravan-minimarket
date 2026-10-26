@@ -24,12 +24,13 @@ const pageTitles: Record<string, string> = {
   '/promociones': 'Promociones',
   '/ai': 'Alcaraván AI',
   '/usuarios': 'Usuarios',
+  '/ventas': 'Ventas',
 }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
-  const [userRole, setUserRole] = useState<string>('cajero')
+  const [userRole, setUserRole] = useState<string>('admin')
   const pathname = usePathname()
   const router = useRouter()
   const title = pageTitles[pathname] ?? 'Alcaraván'
@@ -43,15 +44,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           window.location.href = '/login'
           return
         }
-
-        // Obtener rol del usuario
         const { data: userData } = await supabase
           .from('users')
-          .select('roles(name)')
+          .select('role')
           .eq('id', user.id)
           .single()
-
-        const rol = (userData as any)?.roles?.name ?? 'admin'
+        // Si no tiene role asignado → tratar como admin (ve todo)
+        const rol = (userData as any)?.role ?? 'admin'
         setUserRole(rol)
         setAuthChecked(true)
       } catch {
@@ -74,12 +73,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="flex h-screen overflow-hidden bg-stone-50">
-      {/* Sidebar desktop */}
       <div className="hidden lg:flex lg:w-60 lg:flex-shrink-0">
         <Sidebar userRole={userRole} />
       </div>
 
-      {/* Sidebar móvil — overlay */}
       {sidebarOpen && (
         <>
           <div
@@ -92,15 +89,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </>
       )}
 
-      {/* Contenido principal */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <Header
-          title={title}
-          onMenuToggle={() => setSidebarOpen(!sidebarOpen)}
-        />
-        <main className="flex-1 overflow-auto">
-          {children}
-        </main>
+        <Header title={title} onMenuToggle={() => setSidebarOpen(!sidebarOpen)} />
+        <main className="flex-1 overflow-auto">{children}</main>
       </div>
     </div>
   )
