@@ -44,7 +44,47 @@ function ReceiptModal({ receipt, onClose }: { receipt: ReceiptData; onClose: () 
   }
 
   function handlePrint() {
-    window.print()
+    const w = window.open('', '_blank', 'width=400,height=700')
+    if (!w) { window.print(); return }
+    const cashPayment = receipt.payments.find((p) => p.method === 'cash')
+    const changeAmt = cashPayment?.received ? cashPayment.received - cashPayment.amount : 0
+    const itemsHtml = receipt.items.map(i => `<tr>
+      <td style="padding:3px 0">${i.product_name}</td>
+      <td style="text-align:center;padding:3px 4px">${i.quantity}</td>
+      <td style="text-align:right;padding:3px 0">${formatCurrency(i.total)}</td>
+    </tr>`).join('')
+    const paymentsHtml = receipt.payments.map(p => `<div style="display:flex;justify-content:space-between;font-size:11px">
+      <span>${PAYMENT_LABELS[p.method] ?? p.method}</span><span>${formatCurrency(p.amount)}</span>
+    </div>`).join('')
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+      body{font-family:monospace;font-size:12px;width:80mm;margin:0;padding:8px}
+      h2{text-align:center;margin:4px 0;font-size:15px;letter-spacing:2px}
+      .sub{text-align:center;font-size:10px;color:#666;margin-bottom:6px}
+      table{width:100%;border-collapse:collapse;font-size:11px}
+      th{border-bottom:1px dashed #999;padding:3px 0;font-size:10px}
+      th:last-child{text-align:right} td:last-child{text-align:right}
+      hr{border:none;border-top:1px dashed #999;margin:6px 0}
+      .total{font-size:14px;font-weight:bold;display:flex;justify-content:space-between;margin-top:4px}
+    </style></head><body>
+      <h2>ALCARAVÁN</h2>
+      <div class="sub">Minimarket &amp; Cafetería<br>
+      ${receipt.date.toLocaleString('es-CO')}<br><b>${receipt.saleNumber}</b></div>
+      ${receipt.customerName ? `<div style="font-size:11px;margin-bottom:4px">Cliente: <b>${receipt.customerName}</b></div>` : ''}
+      <table><thead><tr><th style="text-align:left">Producto</th><th>Cant</th><th>Total</th></tr></thead>
+      <tbody>${itemsHtml}</tbody></table><hr>
+      <div style="font-size:11px">
+        <div style="display:flex;justify-content:space-between"><span>Subtotal</span><span>${formatCurrency(receipt.subtotal)}</span></div>
+        ${receipt.discount > 0 ? `<div style="display:flex;justify-content:space-between;color:green"><span>Descuento</span><span>-${formatCurrency(receipt.discount)}</span></div>` : ''}
+        ${receipt.tax > 0 ? `<div style="display:flex;justify-content:space-between"><span>IVA</span><span>${formatCurrency(receipt.tax)}</span></div>` : ''}
+      </div>
+      <div class="total"><span>TOTAL</span><span>${formatCurrency(receipt.total)}</span></div>
+      <hr>${paymentsHtml}
+      ${changeAmt > 0 ? `<div style="display:flex;justify-content:space-between;font-size:11px;font-weight:bold;color:green"><span>Cambio</span><span>${formatCurrency(changeAmt)}</span></div>` : ''}
+      <div style="text-align:center;margin-top:10px;font-size:10px;color:#999">¡Gracias por su compra!</div>
+    </body></html>`)
+    w.document.close()
+    w.focus()
+    setTimeout(() => { w.print(); w.close() }, 350)
   }
 
   return (
@@ -201,6 +241,74 @@ function ReceiptModal({ receipt, onClose }: { receipt: ReceiptData; onClose: () 
         </div>
       </div>
     </>
+  )
+}
+
+// ─── Componente: Buscador de cliente ────────────────────────────────
+function CustomerSearch({
+  onSelect,
+  onClose,
+}: {
+  onSelect: (c: Customer) => void
+  onClose: () => void
+}) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<Customer[]>([])
+  const [loading, setLoading] = useState(false)
+  const supabase = createClient()
+
+  useEffect(() => {
+    if (!query.trim() || query.length < 2) { setResults([]); return }
+    const t = setTimeout(async () => {
+      setLoading(true)
+      const { data } = await supabase
+        .from('customers')
+        .select('id, first_name, last_name, full_name, phone, document_number, loyalty_points')
+        .eq('is_active', true)
+        .or(`full_name.ilike.%${query}%,first_name.ilike.%${query}%,phone.ilike.%${query}%,document_number.ilike.%${query}%`)
+        .order('first_name')
+        .limit(10)
+      setResults((data ?? []).map((c: any) => ({
+        ...c,
+        name: c.full_name || [c.first_name, c.last_name].filter(Boolean).join(' '),
+      })))
+      setLoading(false)
+    }, 250)
+    return () => clearTimeout(t)
+  }, [query])
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4">
+      <div className="bg-white w-full sm:rounded-2xl sm:max-w-sm shadow-2xl">
+        <div className="px-4 py-3 border-b flex items-center gap-3">
+          <input autoFocus type="text" value={query} onChange={e => setQuery(e.target.value)}
+            placeholder="Nombre, teléfono o documento..."
+            className="flex-1 outline-none text-stone-800 placeholder:text-stone-400 text-sm" />
+          {loading && <span className="w-4 h-4 border-2 border-amber-700/30 border-t-amber-700 rounded-full animate-spin" />}
+          <button onClick={onClose} className="text-stone-400 hover:text-stone-600 text-lg">✕</button>
+        </div>
+        <div className="max-h-64 overflow-y-auto">
+          {results.length === 0 && query.length >= 2 && !loading && (
+            <p className="text-center text-stone-400 text-sm py-8">No se encontraron clientes</p>
+          )}
+          {results.map(c => (
+            <button key={c.id} onClick={() => { onSelect(c); onClose() }}
+              className="w-full flex items-center justify-between px-4 py-3 hover:bg-amber-50 transition-colors text-left border-b border-stone-50 last:border-0">
+              <div>
+                <p className="font-medium text-stone-800 text-sm">{(c as any).name}</p>
+                {c.phone && <p className="text-xs text-stone-400">📞 {c.phone}</p>}
+              </div>
+              {(c.loyalty_points ?? 0) > 0 && (
+                <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">⭐ {c.loyalty_points}</span>
+              )}
+            </button>
+          ))}
+        </div>
+        <div className="p-3 border-t">
+          <p className="text-xs text-stone-400 text-center">Escribe para buscar clientes</p>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -366,12 +474,16 @@ function CartItemRow({
 // ─── Modal de pago ───────────────────────────────────────────────────
 function PaymentModal({
   total,
+  hasCustomer,
   onClose,
   onConfirm,
+  onConfirmFiado,
 }: {
   total: number
+  hasCustomer: boolean
   onClose: () => void
   onConfirm: (payments: CartPayment[]) => void
+  onConfirmFiado: () => void
 }) {
   const [payments, setPayments] = useState<CartPayment[]>([{ method: 'cash', amount: total }])
   const [processing, setProcessing] = useState(false)
@@ -494,31 +606,43 @@ function PaymentModal({
           </div>
         </div>
 
-        <div className="px-6 pb-6 flex gap-3">
-          <button
-            onClick={onClose}
-            className="flex-1 py-3 rounded-xl border border-stone-200 text-stone-600 font-medium hover:bg-stone-50 transition-colors"
-          >
-            Cancelar
-          </button>
-          <button
-            onClick={async () => {
-              setProcessing(true)
-              await onConfirm(payments)
-              setProcessing(false)
-            }}
-            disabled={remaining > 0 || processing}
-            className="flex-1 py-3 rounded-xl bg-amber-700 text-white font-bold hover:bg-amber-800 disabled:bg-stone-300 disabled:cursor-not-allowed transition-colors shadow-lg shadow-amber-700/30"
-          >
-            {processing ? (
-              <span className="flex items-center justify-center gap-2">
-                <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                Procesando...
-              </span>
-            ) : (
-              '✓ Confirmar Venta'
-            )}
-          </button>
+        <div className="px-6 pb-6 space-y-2">
+          {/* Botón Fiado */}
+          {hasCustomer && (
+            <button
+              onClick={async () => { setProcessing(true); await onConfirmFiado(); setProcessing(false) }}
+              disabled={processing}
+              className="w-full py-2.5 rounded-xl border-2 border-orange-400 text-orange-600 font-semibold hover:bg-orange-50 transition-colors text-sm"
+            >
+              📋 Registrar como Fiado (pago pendiente)
+            </button>
+          )}
+          <div className="flex gap-3">
+            <button
+              onClick={onClose}
+              className="flex-1 py-3 rounded-xl border border-stone-200 text-stone-600 font-medium hover:bg-stone-50 transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={async () => {
+                setProcessing(true)
+                await onConfirm(payments)
+                setProcessing(false)
+              }}
+              disabled={remaining > 0 || processing}
+              className="flex-1 py-3 rounded-xl bg-amber-700 text-white font-bold hover:bg-amber-800 disabled:bg-stone-300 disabled:cursor-not-allowed transition-colors shadow-lg shadow-amber-700/30"
+            >
+              {processing ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Procesando...
+                </span>
+              ) : (
+                '✓ Confirmar Venta'
+              )}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -551,6 +675,7 @@ export default function POSPage() {
   } = useCartStore()
 
   const [showPayment, setShowPayment] = useState(false)
+  const [showCustomerSearch, setShowCustomerSearch] = useState(false)
   const [saleReceipt, setSaleReceipt] = useState<ReceiptData | null>(null)
   const [saleError, setSaleError] = useState('')
 
@@ -570,7 +695,12 @@ export default function POSPage() {
     return () => window.removeEventListener('keydown', handleKey)
   }, [items])
 
-  async function handleConfirmSale(payments: CartPayment[]) {
+  async function handleConfirmFiado() {
+    if (!customer) return
+    await handleConfirmSale([], true)
+  }
+
+  async function handleConfirmSale(payments: CartPayment[], isFiado = false) {
     try {
       setSaleError('')
 
@@ -595,7 +725,7 @@ export default function POSPage() {
           discount_amount: cartDiscount,
           tax_amount: cartTax,
           total: cartTotal,
-          status: 'completed',
+          status: isFiado ? 'pending' : 'completed',
           notes: cartNotes || null,
         })
         .select()
@@ -654,7 +784,9 @@ export default function POSPage() {
         tax: cartTax,
         total: cartTotal,
         payments,
-        customerName: cartCustomer?.name,
+        customerName: cartCustomer
+          ? (cartCustomer.full_name || [cartCustomer.first_name, cartCustomer.last_name].filter(Boolean).join(' '))
+          : undefined,
         notes: cartNotes,
       })
     } catch (err) {
@@ -712,19 +844,33 @@ export default function POSPage() {
       {/* ─── Panel derecho: carrito ──────────────────────────── */}
       <div className="w-80 xl:w-96 flex flex-col bg-white border-l border-stone-200 shadow-xl">
         {/* Encabezado carrito */}
-        <div className="px-4 py-3 border-b border-stone-100 flex items-center justify-between bg-stone-50">
-          <div>
+        <div className="px-4 py-3 border-b border-stone-100 bg-stone-50 space-y-2">
+          <div className="flex items-center justify-between">
             <h3 className="font-bold text-stone-800">Carrito</h3>
-            {customer && (
-              <p className="text-xs text-stone-500">{customer.name}</p>
+            {items.length > 0 && (
+              <button
+                onClick={suspendCart}
+                className="text-xs px-3 py-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-600 transition-colors"
+              >
+                ⏸ Suspender
+              </button>
             )}
           </div>
-          {items.length > 0 && (
+          {/* Selector de cliente */}
+          {customer ? (
+            <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+              <span className="text-sm">👤</span>
+              <p className="flex-1 text-xs font-medium text-amber-800 truncate">
+                {customer.full_name || [customer.first_name, customer.last_name].filter(Boolean).join(' ')}
+              </p>
+              <button onClick={() => setCustomer(null)} className="text-amber-400 hover:text-amber-700 text-sm">✕</button>
+            </div>
+          ) : (
             <button
-              onClick={suspendCart}
-              className="text-xs px-3 py-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-600 transition-colors"
+              onClick={() => setShowCustomerSearch(true)}
+              className="w-full text-xs px-3 py-2 rounded-xl border border-dashed border-stone-300 text-stone-500 hover:border-amber-400 hover:text-amber-700 hover:bg-amber-50 transition-all"
             >
-              ⏸ Suspender
+              👤 Agregar cliente (opcional)
             </button>
           )}
         </div>
@@ -800,8 +946,18 @@ export default function POSPage() {
       {showPayment && (
         <PaymentModal
           total={total}
+          hasCustomer={!!customer}
           onClose={() => setShowPayment(false)}
           onConfirm={handleConfirmSale}
+          onConfirmFiado={handleConfirmFiado}
+        />
+      )}
+
+      {/* Buscador de cliente */}
+      {showCustomerSearch && (
+        <CustomerSearch
+          onSelect={setCustomer}
+          onClose={() => setShowCustomerSearch(false)}
         />
       )}
 
