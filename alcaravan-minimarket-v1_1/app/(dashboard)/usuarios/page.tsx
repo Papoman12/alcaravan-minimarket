@@ -1,78 +1,250 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+'use client'
 
-const SUPABASE_URL = 'https://wmufsliuuvfombbegzbc.supabase.co'
+import { useState, useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
 
-export async function POST(req: NextRequest) {
-  try {
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-    if (!serviceKey) {
-      return NextResponse.json(
-        { error: 'Falta la variable SUPABASE_SERVICE_ROLE_KEY en Vercel. Ve a Vercel → Settings → Environment Variables y agrégala.' },
-        { status: 500 }
-      )
-    }
+interface UserRow {
+  id: string
+  email: string
+  full_name: string
+  phone?: string
+  is_active: boolean
+  created_at: string
+  roles?: { id: string; name: string }
+}
 
-    const body = await req.json()
-    const { email, password, full_name, phone, role_id } = body
+interface Role {
+  id: string
+  name: string
+}
 
-    if (!email || !password || !full_name || !role_id) {
-      return NextResponse.json(
-        { error: 'Faltan campos obligatorios' },
-        { status: 400 }
-      )
-    }
+export default function UsuariosPage() {
+  const [users, setUsers] = useState<UserRow[]>([])
+  const [roles, setRoles] = useState<Role[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showModal, setShowModal] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [successMsg, setSuccessMsg] = useState('')
+  const [form, setForm] = useState({
+    full_name: '',
+    email: '',
+    password: '',
+    phone: '',
+    role_id: '',
+  })
 
-    const supabaseAdmin = createClient(SUPABASE_URL, serviceKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    })
+  useEffect(() => { load(); loadRoles() }, [])
 
-    // 1. Crear usuario en Supabase Auth
-    const { data: authData, error: authErr } = await supabaseAdmin.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: { full_name },
-    })
-
-    if (authErr || !authData?.user) {
-      return NextResponse.json(
-        { error: authErr?.message ?? 'Error al crear usuario' },
-        { status: 400 }
-      )
-    }
-
-    const userId = authData.user.id
-
-    // 2. Esperar un momento para que el trigger cree la fila en public.users
-    await new Promise(r => setTimeout(r, 800))
-
-    // 3. Actualizar role_id (el trigger ya debió crear la fila)
-    const { error: updateErr } = await supabaseAdmin
+  async function load() {
+    setLoading(true)
+    const supabase = createClient()
+    const { data } = await supabase
       .from('users')
-      .update({ role_id, is_active: true })
-      .eq('id', userId)
+      .select('id, email, full_name, phone, is_active, created_at, roles(id, name)')
+      .order('created_at', { ascending: false })
+    setUsers((data as UserRow[]) ?? [])
+    setLoading(false)
+  }
 
-    if (updateErr) {
-      // Si no existe la fila todavía, insertarla
-      const { error: insertErr } = await supabaseAdmin
-        .from('users')
-        .insert({ id: userId, role_id, is_active: true })
+  async function loadRoles() {
+    const supabase = createClient()
+    const { data } = await supabase.from('roles').select('id, name').order('name')
+    const r = data ?? []
+    setRoles(r)
+    // Pre-seleccionar el primer rol no-admin
+    const defaultRole = r.find((x: Role) => x.name !== 'admin') ?? r[0]
+    if (defaultRole) setForm(f => ({ ...f, role_id: defaultRole.id }))
+  }
 
-      if (insertErr) {
-        return NextResponse.json({
-          success: true,
-          userId,
-          warning: 'Usuario creado pero no se pudo asignar rol: ' + insertErr.message,
-        })
-      }
+  async function handleCreate() {
+    if (!form.full_name || !form.email || !form.password || !form.role_id) {
+      setError('Nombre, correo, contraseña y rol son obligatorios')
+      return
+    }
+    if (form.password.length < 6) {
+      setError('La contraseña debe tener mínimo 6 caracteres')
+      return
     }
 
-    return NextResponse.json({ success: true, userId })
-  } catch (err: any) {
-    return NextResponse.json(
-      { error: err.message ?? 'Error inesperado' },
-      { status: 500 }
-    )
+    setSaving(true)
+    setError('')
+
+    try {
+      const res = await fetch('/api/admin/create-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: form.email.trim().toLowerCase(),
+          password: form.password,
+          full_name: form.full_name.trim(),
+          phone: form.phone.trim(),
+          role_id: form.role_id,
+        }),
+      })
+
+      const json = await res.json()
+
+      if (!res.ok || json.error) {
+        setError(json.error ?? 'Error al crear usuario')
+        setSaving(false)
+        return
+      }
+
+      if (json.warning) {
+        setSuccessMsg(`⚠️ Usuario creado pero: ${json.warning}`)
+      } else {
+        setSuccessMsg(`✅ Usuario "${form.full_name}" creado correctamente`)
+      }
+
+      setShowModal(false)
+      const defaultRole = roles.find((x) => x.name !== 'admin') ?? roles[0]
+      setForm({ full_name: '', email: '', password: '', phone: '', role_id: defaultRole?.id ?? '' })
+      setTimeout(() => setSuccessMsg(''), 5000)
+      load()
+    } catch (err: any) {
+      setError('Error de red: ' + err.message)
+    }
+
+    setSaving(false)
   }
+
+  async function toggleActive(user: UserRow) {
+    const supabase = createClient()
+    await supabase.from('users').update({ is_active: !user.is_active }).eq('id', user.id)
+    load()
+  }
+
+  return (
+    <div className="p-4 max-w-4xl mx-auto">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-stone-800">Usuarios</h1>
+          <p className="text-stone-500 text-sm mt-0.5">
+            {users.filter((u) => u.is_active).length} activos · {users.length} total
+          </p>
+        </div>
+        <button
+          onClick={() => { setError(''); setShowModal(true) }}
+          className="px-4 py-2 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 transition-colors"
+        >
+          + Nuevo Usuario
+        </button>
+      </div>
+
+      {successMsg && (
+        <div className="mb-4 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl px-4 py-3 text-sm font-medium">
+          {successMsg}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex justify-center py-16">
+          <div className="w-8 h-8 border-4 border-amber-700 border-t-transparent rounded-full animate-spin" />
+        </div>
+      ) : users.length === 0 ? (
+        <div className="text-center py-16">
+          <p className="text-5xl mb-3">👤</p>
+          <p className="text-stone-500">No hay usuarios registrados</p>
+        </div>
+      ) : (
+        <div className="grid gap-3">
+          {users.map((u) => (
+            <div key={u.id} className={`bg-white rounded-2xl border p-4 flex items-center gap-4 ${u.is_active ? 'border-stone-200' : 'border-stone-100 opacity-60'}`}>
+              <div className="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                <span className="text-xl font-bold text-amber-700">
+                  {u.full_name?.charAt(0)?.toUpperCase() ?? '?'}
+                </span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="font-semibold text-stone-800">{u.full_name}</p>
+                  {!u.is_active && (
+                    <span className="text-xs bg-stone-100 text-stone-500 px-2 py-0.5 rounded-full">Inactivo</span>
+                  )}
+                  {(u.roles as any)?.name && (
+                    <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full capitalize">
+                      {(u.roles as any).name}
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm text-stone-500 mt-0.5">{u.email}</p>
+                {u.phone && <p className="text-xs text-stone-400">📞 {u.phone}</p>}
+              </div>
+              <button
+                onClick={() => toggleActive(u)}
+                className={`px-3 py-1.5 text-sm rounded-lg font-medium flex-shrink-0 ${u.is_active ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'}`}
+              >
+                {u.is_active ? 'Desactivar' : 'Activar'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <h3 className="text-lg font-bold text-stone-800 mb-4">Nuevo Usuario</h3>
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-3 py-2 text-sm mb-4">{error}</div>
+            )}
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-1">Nombre completo *</label>
+                <input type="text" value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })}
+                  placeholder="Ej: María García"
+                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-1">Correo electrónico *</label>
+                <input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })}
+                  placeholder="correo@ejemplo.com"
+                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-1">Contraseña *</label>
+                <input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })}
+                  placeholder="Mínimo 6 caracteres"
+                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-stone-700 mb-1">Teléfono</label>
+                  <input type="tel" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })}
+                    placeholder="300 000 0000"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-stone-700 mb-1">Rol *</label>
+                  <select value={form.role_id} onChange={e => setForm({ ...form, role_id: e.target.value })}
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700">
+                    <option value="">Seleccionar...</option>
+                    {roles.map(r => (
+                      <option key={r.id} value={r.id}>{r.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setShowModal(false)}
+                className="flex-1 py-2.5 border border-stone-200 rounded-xl text-stone-600 hover:bg-stone-50">
+                Cancelar
+              </button>
+              <button onClick={handleCreate} disabled={saving}
+                className="flex-1 py-2.5 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 disabled:bg-stone-300">
+                {saving ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Creando...
+                  </span>
+                ) : 'Crear Usuario'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
