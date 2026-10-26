@@ -152,6 +152,7 @@ export interface Customer {
   first_name: string
   last_name?: string
   full_name: string
+  name?: string
   phone?: string
   whatsapp?: string
   email?: string
