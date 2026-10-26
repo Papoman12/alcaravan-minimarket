@@ -66,7 +66,8 @@ function ReceiptModal({ receipt, onClose }: { receipt: ReceiptData; onClose: () 
       hr{border:none;border-top:1px dashed #999;margin:6px 0}
       .total{font-size:14px;font-weight:bold;display:flex;justify-content:space-between;margin-top:4px}
     </style></head><body>
-      <h2>Alcaraván Minimarket - Café</h2>
+      <h2>Alcaraván 
+      Minimarket - Café</h2>
       <div class="sub"><br>
       ${receipt.date.toLocaleString('es-CO')}<br><b>${receipt.saleNumber}</b></div>
       ${receipt.customerName ? `<div style="font-size:11px;margin-bottom:4px">Cliente: <b>${receipt.customerName}</b></div>` : ''}
