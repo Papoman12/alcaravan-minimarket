@@ -66,8 +66,8 @@ function ReceiptModal({ receipt, onClose }: { receipt: ReceiptData; onClose: () 
       hr{border:none;border-top:1px dashed #999;margin:6px 0}
       .total{font-size:14px;font-weight:bold;display:flex;justify-content:space-between;margin-top:4px}
     </style></head><body>
-      <h2>ALCARAVÁN</h2>
-      <div class="sub">Minimarket &amp; Cafetería<br>
+      <h2>Alcaraván Minimarket - Café</h2>
+      <div class="sub"><br>
       ${receipt.date.toLocaleString('es-CO')}<br><b>${receipt.saleNumber}</b></div>
       ${receipt.customerName ? `<div style="font-size:11px;margin-bottom:4px">Cliente: <b>${receipt.customerName}</b></div>` : ''}
       <table><thead><tr><th style="text-align:left">Producto</th><th>Cant</th><th>Total</th></tr></thead>
@@ -128,8 +128,7 @@ function ReceiptModal({ receipt, onClose }: { receipt: ReceiptData; onClose: () 
           <div className="print-receipt flex-1 overflow-y-auto p-4">
             {/* Cabecera tienda */}
             <div className="text-center border-b border-dashed border-stone-300 pb-3 mb-3">
-              <p className="font-bold text-lg tracking-wide">ALCARAVÁN</p>
-              <p className="text-xs text-stone-500">Minimarket &amp; Cafetería</p>
+              <p className="font-bold text-lg tracking-wide">Alcaraván Minimarket - Café</p>
               <p className="text-xs text-stone-400 mt-1">
                 {receipt.date.toLocaleDateString('es-CO', {
                   day: '2-digit', month: 'long', year: 'numeric'
