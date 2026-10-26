@@ -74,7 +74,7 @@ export default function InventarioPage() {
         .select('id, name, code, barcode, cost_price, sale_price, stock, min_stock, is_active, category:categories(name), unit:units_of_measure(abbreviation)')
         .order('name')
         .limit(500)
-      const rows = (data ?? []) as Product[]
+      const rows = (data ?? []) as unknown as Product[]
       setProducts(rows)
       const cats = [...new Set(rows.map(p => p.category?.name).filter(Boolean))] as string[]
       setCategories(cats.sort())
