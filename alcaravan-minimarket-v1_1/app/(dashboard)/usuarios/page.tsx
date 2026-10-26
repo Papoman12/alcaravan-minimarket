@@ -43,7 +43,7 @@ export default function UsuariosPage() {
       .from('users')
       .select('id, email, full_name, phone, is_active, created_at, roles(id, name)')
       .order('created_at', { ascending: false })
-    setUsers((data as UserRow[]) ?? [])
+    setUsers((data as unknown as UserRow[]) ?? [])
     setLoading(false)
   }
 
