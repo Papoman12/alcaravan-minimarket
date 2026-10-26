@@ -32,17 +32,15 @@ const navItems: NavItem[] = [
   { href: '/ai',           icon: '🤖', label: 'Alcaraván AI', phase: 5 },
 ]
 
-// Páginas visibles por rol
-// admin (o cualquier rol no listado aquí) ve TODO
-const PERMISOS: Record = {
+// admin (o cualquier rol no listado) ve TODO
+const PERMISOS: Record<string, string[]> = {
   cajero: ['/', '/caja', '/pos', '/clientes'],
   bodega: ['/', '/productos', '/inventario', '/compras', '/proveedores'],
   inventario: ['/', '/productos', '/inventario', '/compras', '/proveedores'],
 }
 
 function getRutas(rol: string): string[] | null {
-  const r = rol.toLowerCase()
-  return PERMISOS[r] ?? null // null = admin = ve todo
+  return PERMISOS[rol.toLowerCase()] ?? null
 }
 
 export default function Sidebar({
@@ -53,13 +51,11 @@ export default function Sidebar({
   userRole?: string
 }) {
   const pathname = usePathname()
-  const router = useRouter()
 
-  const rutasPermitidas = getRutas(userRole) // null = admin
-
+  const rutasPermitidas = getRutas(userRole)
   const itemsVisibles = rutasPermitidas
     ? navItems.filter(item => rutasPermitidas.includes(item.href))
-    : navItems // admin ve todo
+    : navItems
 
   async function handleLogout() {
     const supabase = createClient()
@@ -69,7 +65,6 @@ export default function Sidebar({
 
   return (
     <aside className="flex flex-col h-full bg-gradient-to-b from-amber-950 to-stone-900 text-white">
-      {/* Logo */}
       <div className="px-5 py-5 border-b border-white/10">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-amber-700 rounded-xl flex items-center justify-center shadow-lg flex-shrink-0">
@@ -82,20 +77,18 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* Navegación */}
       <nav className="flex-1 overflow-y-auto py-3 px-3 space-y-0.5">
         {itemsVisibles.map((item) => {
           const isActive = item.href === '/'
             ? pathname === '/'
             : pathname === item.href || pathname.startsWith(item.href + '/')
-
           return (
             <Link
               key={item.href}
               href={item.href}
               onClick={onClose}
               className={cn(
-                'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150 group',
+                'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150',
                 isActive
                   ? 'bg-amber-700 text-white shadow-lg shadow-amber-900/50'
                   : 'text-white/70 hover:text-white hover:bg-white/10'
@@ -108,11 +101,8 @@ export default function Sidebar({
         })}
       </nav>
 
-      {/* Footer con rol y logout */}
       <div className="px-4 py-4 border-t border-white/10 space-y-2">
-        <p className="text-white/40 text-[10px] text-center capitalize">
-          Rol: {userRole}
-        </p>
+        <p className="text-white/40 text-[10px] text-center capitalize">Rol: {userRole}</p>
         <button
           onClick={handleLogout}
           className="w-full py-2 text-xs text-white/50 hover:text-white hover:bg-white/10 rounded-xl transition-colors"
