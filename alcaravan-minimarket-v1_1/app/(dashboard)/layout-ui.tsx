@@ -51,7 +51,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           .eq('id', user.id)
           .single()
 
-        const rol = (userData as any)?.roles?.name ?? 'cajero'
+        const rol = (userData as any)?.roles?.name ?? 'admin'
         setUserRole(rol)
         setAuthChecked(true)
       } catch {
