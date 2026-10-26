@@ -327,8 +327,19 @@ function EditSaleModal({
 
   async function handleDeletePayment(paymentId: string) {
     const supabase = createClient()
-    await supabase.from('sale_payments').delete().eq('id', paymentId)
-    setPayments(payments.filter(p => p.id !== paymentId))
+    const { error: err } = await supabase.from('sale_payments').delete().eq('id', paymentId)
+    if (!err) setPayments(payments.filter(p => p.id !== paymentId))
+    else setError('No se pudo eliminar el pago: ' + err.message)
+  }
+
+  async function handleUpdatePaymentMethod(paymentId: string, newMethod: string) {
+    const supabase = createClient()
+    const { error: err } = await supabase
+      .from('sale_payments')
+      .update({ payment_method: newMethod })
+      .eq('id', paymentId)
+    if (!err) setPayments(payments.map(p => p.id === paymentId ? { ...p, payment_method: newMethod } : p))
+    else setError('No se pudo actualizar: ' + err.message)
   }
 
   async function handleAddPayment() {
@@ -392,16 +403,22 @@ function EditSaleModal({
             ) : (
               <div className="space-y-2">
                 {payments.map(p => (
-                  <div key={p.id} className="flex items-center justify-between bg-stone-50 rounded-xl px-3 py-2">
-                    <div>
-                      <p className="text-sm font-medium text-stone-700">{PAYMENT_LABELS[p.payment_method] ?? p.payment_method}</p>
-                      {p.reference && <p className="text-xs text-stone-400">Ref: {p.reference}</p>}
-                    </div>
-                    <div className="flex items-center gap-3">
+                  <div key={p.id} className="bg-stone-50 rounded-xl px-3 py-2 space-y-1.5">
+                    <div className="flex items-center justify-between">
                       <span className="font-bold text-stone-800">{formatCurrency(p.amount)}</span>
                       <button onClick={() => handleDeletePayment(p.id)}
-                        className="text-red-400 hover:text-red-600 text-lg leading-none">✕</button>
+                        className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50">
+                        🗑️ Eliminar
+                      </button>
                     </div>
+                    <select
+                      value={p.payment_method}
+                      onChange={e => handleUpdatePaymentMethod(p.id, e.target.value)}
+                      className="w-full px-3 py-1.5 rounded-lg border border-stone-200 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
+                    >
+                      {METHODS.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
+                    </select>
+                    {p.reference && <p className="text-xs text-stone-400">Ref: {p.reference}</p>}
                   </div>
                 ))}
               </div>
