@@ -91,11 +91,10 @@ export default function ClientesPage() {
     setSaving(true)
     setError('')
     const supabase = createClient()
-    const fullName = [form.first_name.trim(), form.last_name.trim()].filter(Boolean).join(' ')
+    // NO incluir full_name: es columna GENERATED en la BD (se calcula sola)
     const payload: Record<string, any> = {
       first_name: form.first_name.trim(),
       last_name: form.last_name.trim() || null,
-      full_name: fullName,
       document_type: form.document_type || null,
       document_number: form.document_number.trim() || null,
       phone: form.phone.trim() || null,
