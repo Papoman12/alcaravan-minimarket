@@ -35,7 +35,7 @@ const navItems: NavItem[] = [
 
 // admin (o cualquier rol no listado) ve TODO
 const PERMISOS: Record<string, string[]> = {
-  cajero:    ['/', '/pos', '/caja', '/ventas', '/clientes'],
+  cajero:    ['/', '/pos', '/caja', '/clientes'],
   bodega:    ['/', '/productos', '/inventario', '/compras', '/proveedores'],
   inventario:['/', '/productos', '/inventario', '/compras', '/proveedores'],
 }
