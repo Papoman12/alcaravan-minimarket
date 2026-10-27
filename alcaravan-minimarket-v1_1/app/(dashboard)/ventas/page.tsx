@@ -97,54 +97,53 @@ function SaleDetailModal({
   function handlePrint() {
     const w = window.open('', '_blank', 'width=400,height=700')
     if (!w) return
-    const items = (sale.sale_items ?? [])
-      .map(i => `
-        <tr>
-          <td style="padding:4px 0;">${i.product_name}</td>
-          <td style="text-align:center;padding:4px 4px;">${i.quantity}</td>
-          <td style="text-align:right;padding:4px 0;">${formatCurrency(i.unit_price)}</td>
-          <td style="text-align:right;padding:4px 0;">${formatCurrency(i.total)}</td>
-        </tr>`)
-      .join('')
-    const payments = (sale.sale_payments ?? [])
-      .map(p => `<div style="display:flex;justify-content:space-between;font-size:11px;">
-        <span>${PAYMENT_LABELS[p.payment_method] ?? p.payment_method}</span>
-        <span>${formatCurrency(p.amount)}</span>
-      </div>`)
-      .join('')
     w.document.write(`<!DOCTYPE html><html><head>
-      <meta charset="utf-8">
+      <meta charset="UTF-8"><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
       <style>
-        body{font-family:monospace;font-size:12px;width:80mm;margin:0;padding:8px;}
-        h2{text-align:center;margin:4px 0;font-size:16px;}
-        .sub{text-align:center;font-size:10px;color:#666;margin-bottom:8px;}
-        table{width:100%;border-collapse:collapse;font-size:11px;}
-        th{border-bottom:1px dashed #999;padding:4px 0;font-size:10px;text-align:left;}
-        th:nth-child(2){text-align:center;}
-        th:nth-child(3),th:nth-child(4){text-align:right;}
-        hr{border:none;border-top:1px dashed #999;margin:8px 0;}
-        .total{font-size:14px;font-weight:bold;display:flex;justify-content:space-between;margin-top:6px;}
+        @page{margin:2mm}
+        body{font-family:Arial,sans-serif;font-size:11px;width:70mm;margin:0 auto;padding:6px;color:#000}
+        h2{text-align:center;margin:4px 0;font-size:15px;font-weight:bold}
+        .sub{text-align:center;font-size:10px;color:#444;margin-bottom:6px}
+        hr{border:none;border-top:1px dashed #999;margin:5px 0}
+        table{width:100%;border-collapse:collapse;font-size:10px}
+        th{font-size:10px;font-weight:bold;padding:3px 2px;border-bottom:1px dashed #999}
+        th.prod{text-align:left;width:60%}
+        th.qty{text-align:center;width:15%}
+        th.price{text-align:right;width:25%}
+        td.prod{text-align:left;padding:3px 2px;word-break:break-word}
+        td.qty{text-align:center;padding:3px 2px}
+        td.price{text-align:right;padding:3px 2px}
+        .totrow{display:table;width:100%;font-size:10px;margin:2px 0}
+        .totrow span:first-child{display:table-cell;text-align:left}
+        .totrow span:last-child{display:table-cell;text-align:right}
+        .grandtotal{display:table;width:100%;font-size:13px;font-weight:bold;margin-top:4px}
+        .grandtotal span:first-child{display:table-cell;text-align:left}
+        .grandtotal span:last-child{display:table-cell;text-align:right}
+        .footer{text-align:center;margin-top:8px;font-size:9px;color:#666}
       </style>
     </head><body>
-      <h2>Alcaraván</h2>
-      <div class="sub">Minimarket - Café<br>${formatDate(sale.created_at)}<br><b>${sale.sale_number}</b></div>
-      ${sale.customers ? `<div style="font-size:11px;margin-bottom:4px;">Cliente: <b>${getCustomerName(sale.customers)}</b></div>` : ''}
+      <h2>Alcarav&aacute;n</h2>
+      <div class="sub">Minimarket - Caf&eacute;<br>${formatDate(sale.created_at)}<br><b>${sale.sale_number}</b></div>
+      ${sale.customers ? `<div style="font-size:10px;margin-bottom:4px;">Cliente: <b>${getCustomerName(sale.customers)}</b></div>` : ''}
       <table>
-        <thead><tr><th>Producto</th><th>Cant</th><th>Precio</th><th>Total</th></tr></thead>
-        <tbody>${items}</tbody>
+        <thead><tr><th class="prod">Producto</th><th class="qty">Cant</th><th class="price">Total</th></tr></thead>
+        <tbody>
+          ${(sale.sale_items ?? []).map(i => `<tr>
+            <td class="prod">${i.product_name}</td>
+            <td class="qty">${i.quantity}</td>
+            <td class="price">${formatCurrency(i.total)}</td>
+          </tr>`).join('')}
+        </tbody>
       </table>
       <hr>
-      <div style="font-size:11px;">
-        <div style="display:flex;justify-content:space-between;"><span>Subtotal</span><span>${formatCurrency(sale.subtotal)}</span></div>
-        ${sale.discount_amount > 0 ? `<div style="display:flex;justify-content:space-between;color:green;"><span>Descuento</span><span>-${formatCurrency(sale.discount_amount)}</span></div>` : ''}
-        ${sale.tax_amount > 0 ? `<div style="display:flex;justify-content:space-between;"><span>IVA</span><span>${formatCurrency(sale.tax_amount)}</span></div>` : ''}
-      </div>
-      <div class="total"><span>TOTAL</span><span>${formatCurrency(sale.total)}</span></div>
+      <div class="totrow"><span>Subtotal</span><span>${formatCurrency(sale.subtotal)}</span></div>
+      ${sale.discount_amount > 0 ? `<div class="totrow"><span>Descuento</span><span>-${formatCurrency(sale.discount_amount)}</span></div>` : ''}
+      ${sale.tax_amount > 0 ? `<div class="totrow"><span>IVA</span><span>${formatCurrency(sale.tax_amount)}</span></div>` : ''}
+      <div class="grandtotal"><span>TOTAL</span><span>${formatCurrency(sale.total)}</span></div>
       <hr>
-      <div style="font-size:11px;font-weight:bold;margin-bottom:4px;">Pagos:</div>
-      ${payments}
-      ${isPending ? `<div style="margin-top:8px;padding:6px;border:1px dashed #f90;font-size:11px;color:#c60;text-align:center;"><b>PENDIENTE: ${formatCurrency(pendingAmount)}</b></div>` : ''}
-      <div style="text-align:center;margin-top:12px;font-size:10px;color:#999;">¡Gracias por su compra!</div>
+      ${(sale.sale_payments ?? []).map(p => `<div class="totrow"><span>${PAYMENT_LABELS[p.payment_method] ?? p.payment_method}</span><span>${formatCurrency(p.amount)}</span></div>`).join('')}
+      ${isPending ? `<div style="margin-top:6px;padding:4px;border:1px dashed #f90;font-size:10px;color:#c60;text-align:center;"><b>PENDIENTE: ${formatCurrency(pendingAmount)}</b></div>` : ''}
+      <div class="footer">&#161;Gracias por su compra!</div>
     </body></html>`)
     w.document.close()
     w.focus()
