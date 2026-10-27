@@ -56,31 +56,54 @@ function ReceiptModal({ receipt, onClose }: { receipt: ReceiptData; onClose: () 
     const paymentsHtml = receipt.payments.map(p => `<div style="display:flex;justify-content:space-between;font-size:11px">
       <span>${PAYMENT_LABELS[p.method] ?? p.method}</span><span>${formatCurrency(p.amount)}</span>
     </div>`).join('')
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-      body{font-family:monospace;font-size:12px;width:80mm;margin:0;padding:8px}
-      h2{text-align:center;margin:4px 0;font-size:15px;letter-spacing:2px}
-      .sub{text-align:center;font-size:10px;color:#666;margin-bottom:6px}
-      table{width:100%;border-collapse:collapse;font-size:11px}
-      th{border-bottom:1px dashed #999;padding:3px 0;font-size:10px}
-      th:last-child{text-align:right} td:last-child{text-align:right}
-      hr{border:none;border-top:1px dashed #999;margin:6px 0}
-      .total{font-size:14px;font-weight:bold;display:flex;justify-content:space-between;margin-top:4px}
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><style>
+      @page{margin:2mm}
+      body{font-family:Arial,sans-serif;font-size:11px;width:70mm;margin:0 auto;padding:6px;color:#000}
+      h2{text-align:center;margin:4px 0;font-size:15px;font-weight:bold}
+      .sub{text-align:center;font-size:10px;color:#444;margin-bottom:6px}
+      hr{border:none;border-top:1px dashed #999;margin:5px 0}
+      table{width:100%;border-collapse:collapse;font-size:10px}
+      th{font-size:10px;font-weight:bold;padding:3px 2px;border-bottom:1px dashed #999}
+      th.prod{text-align:left;width:60%}
+      th.qty{text-align:center;width:15%}
+      th.price{text-align:right;width:25%}
+      td.prod{text-align:left;padding:3px 2px;word-break:break-word}
+      td.qty{text-align:center;padding:3px 2px}
+      td.price{text-align:right;padding:3px 2px}
+      .totrow{display:table;width:100%;font-size:10px;margin:2px 0}
+      .totrow span:first-child{display:table-cell;text-align:left}
+      .totrow span:last-child{display:table-cell;text-align:right}
+      .grandtotal{display:table;width:100%;font-size:13px;font-weight:bold;margin-top:4px}
+      .grandtotal span:first-child{display:table-cell;text-align:left}
+      .grandtotal span:last-child{display:table-cell;text-align:right}
+      .cambio{display:table;width:100%;font-size:12px;font-weight:bold}
+      .cambio span:first-child{display:table-cell;text-align:left}
+      .cambio span:last-child{display:table-cell;text-align:right}
+      .footer{text-align:center;margin-top:8px;font-size:9px;color:#666}
     </style></head><body>
-      <h2>Alcaraván</h2>
-      <div class="sub">Minimarket - Café<br>
+      <h2>Alcarav&aacute;n</h2>
+      <div class="sub">Minimarket - Caf&eacute;<br>
       ${receipt.date.toLocaleString('es-CO')}<br><b>${receipt.saleNumber}</b></div>
-      ${receipt.customerName ? `<div style="font-size:11px;margin-bottom:4px">Cliente: <b>${receipt.customerName}</b></div>` : ''}
-      <table><thead><tr><th style="text-align:left">Producto</th><th>Cant</th><th>Total</th></tr></thead>
-      <tbody>${itemsHtml}</tbody></table><hr>
-      <div style="font-size:11px">
-        <div style="display:flex;justify-content:space-between"><span>Subtotal</span><span>${formatCurrency(receipt.subtotal)}</span></div>
-        ${receipt.discount > 0 ? `<div style="display:flex;justify-content:space-between;color:green"><span>Descuento</span><span>-${formatCurrency(receipt.discount)}</span></div>` : ''}
-        ${receipt.tax > 0 ? `<div style="display:flex;justify-content:space-between"><span>IVA</span><span>${formatCurrency(receipt.tax)}</span></div>` : ''}
-      </div>
-      <div class="total"><span>TOTAL</span><span>${formatCurrency(receipt.total)}</span></div>
-      <hr>${paymentsHtml}
-      ${changeAmt > 0 ? `<div style="display:flex;justify-content:space-between;font-size:11px;font-weight:bold;color:green"><span>Cambio</span><span>${formatCurrency(changeAmt)}</span></div>` : ''}
-      <div style="text-align:center;margin-top:10px;font-size:10px;color:#999">¡Gracias por su compra!</div>
+      ${receipt.customerName ? `<div style="font-size:10px;margin-bottom:4px">Cliente: <b>${receipt.customerName}</b></div>` : ''}
+      <table>
+        <thead><tr><th class="prod">Producto</th><th class="qty">Cant</th><th class="price">Total</th></tr></thead>
+        <tbody>
+          ${receipt.items.map(i => `<tr>
+            <td class="prod">${i.product_name}</td>
+            <td class="qty">${i.quantity}</td>
+            <td class="price">${formatCurrency(i.total)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+      <hr>
+      <div class="totrow"><span>Subtotal</span><span>${formatCurrency(receipt.subtotal)}</span></div>
+      ${receipt.discount > 0 ? `<div class="totrow"><span>Descuento</span><span>-${formatCurrency(receipt.discount)}</span></div>` : ''}
+      ${receipt.tax > 0 ? `<div class="totrow"><span>IVA</span><span>${formatCurrency(receipt.tax)}</span></div>` : ''}
+      <div class="grandtotal"><span>TOTAL</span><span>${formatCurrency(receipt.total)}</span></div>
+      <hr>
+      ${receipt.payments.map(p => `<div class="totrow"><span>${PAYMENT_LABELS[p.method] ?? p.method}</span><span>${formatCurrency(p.amount)}</span></div>`).join('')}
+      ${changeAmt > 0 ? `<div class="totrow"><span>Recibido</span><span>${formatCurrency(cashPayment?.received ?? 0)}</span></div><div class="cambio"><span>Cambio</span><span>${formatCurrency(changeAmt)}</span></div>` : ''}
+      <div class="footer">&#161;Gracias por su compra!</div>
     </body></html>`)
     w.document.close()
     w.focus()
@@ -129,6 +152,7 @@ function ReceiptModal({ receipt, onClose }: { receipt: ReceiptData; onClose: () 
             {/* Cabecera tienda */}
             <div className="text-center border-b border-dashed border-stone-300 pb-3 mb-3">
               <p className="font-bold text-lg tracking-wide">Alcaraván</p>
+              <p className="text-xs text-stone-500">Minimarket - Café</p>
               <p className="text-xs text-stone-500">Minimarket - Café</p>
               <p className="text-xs text-stone-400 mt-1">
                 {receipt.date.toLocaleDateString('es-CO', {
