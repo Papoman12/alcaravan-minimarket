@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useCartStore } from '@/store/cartStore'
-import { formatColombiaTime } from '@/lib/colombia-time'
 import { formatCurrency } from '@/lib/utils'
 import type { Product, Customer, CartPayment, PaymentMethod, CartItem } from '@/types/database'
 
@@ -854,9 +853,11 @@ export default function POSPage() {
               <div className="space-y-2">
                 {suspended_carts.map((sc) => {
                   const clienteNombre = sc.customer
-                    ? (sc.customer as any).full_name || (sc.customer as any).first_name || 'Cliente'
+                    ? ((sc.customer as any).full_name || (sc.customer as any).first_name || 'Cliente') as string
                     : null
-                  const hora = formatColombiaTime(sc.suspended_at)
+                  const hora = new Date(sc.suspended_at).toLocaleTimeString('es-CO', {
+                    timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit',
+                  })
                   const totalSuspendido = sc.items.reduce((s, i) => s + i.total, 0)
                   return (
                     <div key={sc.id} className="flex items-center gap-2 bg-white rounded-lg border border-amber-200 px-2 py-1.5">
@@ -868,23 +869,21 @@ export default function POSPage() {
                           {hora} · {formatCurrency(totalSuspendido)}
                         </p>
                       </div>
-                      <button
-                        onClick={() => recoverCart(sc.id)}
-                        className="text-xs px-2 py-1 bg-amber-700 text-white rounded-lg hover:bg-amber-800 transition-colors whitespace-nowrap font-medium"
-                      >
-                        ▶ Retomar
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (confirm(`¿Cancelar esta venta en espera (${sc.items.length} ítem(s))?`)) {
-                            deleteCart(sc.id)
-                          }
-                        }}
-                        className="text-stone-300 hover:text-red-500 transition-colors px-1 text-sm"
-                        title="Cancelar esta venta"
-                      >
-                        🗑
-                      </button>
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => recoverCart(sc.id)}
+                          className="text-xs px-2 py-1 bg-amber-700 text-white rounded-lg hover:bg-amber-800 transition-colors whitespace-nowrap font-medium"
+                        >
+                          ▶ Retomar
+                        </button>
+                        <button
+                          onClick={() => deleteCart(sc.id)}
+                          className="text-xs px-2 py-1 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition-colors whitespace-nowrap font-medium"
+                          title="Eliminar venta suspendida"
+                        >
+                          🗑
+                        </button>
+                      </div>
                     </div>
                   )
                 })}
