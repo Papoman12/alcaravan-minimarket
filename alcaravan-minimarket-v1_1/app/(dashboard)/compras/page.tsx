@@ -325,6 +325,7 @@ export default function ComprasPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   useEffect(() => {
     load()
@@ -347,6 +348,41 @@ export default function ComprasPage() {
     setPurchases((p ?? []) as unknown as Purchase[])
     setSuppliers(s ?? [])
     setLoading(false)
+  }
+
+  async function handleDelete(purchase: Purchase) {
+    if (!confirm(`¿Eliminar compra ${purchase.purchase_number}? Esta acción revertirá el stock si la compra estaba recibida.`)) return
+    setDeletingId(purchase.id)
+
+    // Si la compra estaba recibida, revertir el stock
+    if (purchase.status === 'received') {
+      const { data: lines } = await supabase
+        .from('purchase_items')
+        .select('product_id, quantity')
+        .eq('purchase_id', purchase.id)
+
+      if (lines && lines.length > 0) {
+        for (const line of lines) {
+          // Obtener stock actual
+          const { data: prod } = await supabase
+            .from('products')
+            .select('stock')
+            .eq('id', line.product_id)
+            .single()
+          if (prod) {
+            await supabase
+              .from('products')
+              .update({ stock: Math.max(0, prod.stock - line.quantity) })
+              .eq('id', line.product_id)
+          }
+        }
+      }
+    }
+
+    // Eliminar la compra (cascade elimina purchase_items)
+    await supabase.from('purchases').delete().eq('id', purchase.id)
+    setDeletingId(null)
+    load()
   }
 
   const statusLabel: Record<string, { label: string; color: string }> = {
@@ -404,13 +440,15 @@ export default function ComprasPage() {
                 <th className="text-left px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">Fecha</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">Estado</th>
                 <th className="text-right px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">Total</th>
+                <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-100">
               {purchases.map((p) => {
                 const st = statusLabel[p.status] ?? { label: p.status, color: 'bg-stone-100 text-stone-600' }
+                const isDeleting = deletingId === p.id
                 return (
-                  <tr key={p.id} className="hover:bg-stone-50 transition-colors">
+                  <tr key={p.id} className={`hover:bg-stone-50 transition-colors ${isDeleting ? 'opacity-50' : ''}`}>
                     <td className="px-4 py-3 font-mono text-sm text-stone-700">{p.purchase_number}</td>
                     <td className="px-4 py-3 text-stone-800">{(p.supplier as { name?: string } | undefined)?.name ?? '—'}</td>
                     <td className="px-4 py-3 text-stone-500 text-sm">{formatDate(p.created_at)}</td>
@@ -418,6 +456,16 @@ export default function ComprasPage() {
                       <span className={`text-xs px-2 py-1 rounded-full font-medium ${st.color}`}>{st.label}</span>
                     </td>
                     <td className="px-4 py-3 text-right font-bold text-stone-800">{formatCurrency(p.total)}</td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={() => handleDelete(p)}
+                        disabled={isDeleting}
+                        className="text-stone-300 hover:text-red-500 transition-colors disabled:opacity-50 text-sm px-2 py-1 rounded-lg hover:bg-red-50"
+                        title="Eliminar compra"
+                      >
+                        {isDeleting ? '...' : '🗑'}
+                      </button>
+                    </td>
                   </tr>
                 )
               })}
