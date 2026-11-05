@@ -44,47 +44,108 @@ function ReceiptModal({ receipt, onClose }: { receipt: ReceiptData; onClose: () 
   }
 
   function handlePrint() {
-    const w = window.open('', '_blank', 'width=400,height=700')
-    if (!w) { window.print(); return }
     const cashPayment = receipt.payments.find((p) => p.method === 'cash')
     const changeAmt = cashPayment?.received ? cashPayment.received - cashPayment.amount : 0
-    const itemsHtml = receipt.items.map(i => `<tr>
-      <td style="padding:3px 0">${i.product_name}</td>
-      <td style="text-align:center;padding:3px 4px">${i.quantity}</td>
-      <td style="text-align:right;padding:3px 0">${formatCurrency(i.total)}</td>
-    </tr>`).join('')
-    const paymentsHtml = receipt.payments.map(p => `<div style="display:flex;justify-content:space-between;font-size:11px">
-      <span>${PAYMENT_LABELS[p.method] ?? p.method}</span><span>${formatCurrency(p.amount)}</span>
-    </div>`).join('')
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-      body{font-family:monospace;font-size:12px;width:80mm;margin:0;padding:8px}
-      h2{text-align:center;margin:4px 0;font-size:15px;letter-spacing:2px}
-      .sub{text-align:center;font-size:10px;color:#666;margin-bottom:6px}
-      table{width:100%;border-collapse:collapse;font-size:11px}
-      th{border-bottom:1px dashed #999;padding:3px 0;font-size:10px}
-      th:last-child{text-align:right} td:last-child{text-align:right}
-      hr{border:none;border-top:1px dashed #999;margin:6px 0}
-      .total{font-size:14px;font-weight:bold;display:flex;justify-content:space-between;margin-top:4px}
-    </style></head><body>
-      <h2>ALCARAVÁN</h2>
-      <div class="sub">Minimarket &amp; Cafetería<br>
-      ${receipt.date.toLocaleString('es-CO')}<br><b>${receipt.saleNumber}</b></div>
-      ${receipt.customerName ? `<div style="font-size:11px;margin-bottom:4px">Cliente: <b>${receipt.customerName}</b></div>` : ''}
-      <table><thead><tr><th style="text-align:left">Producto</th><th>Cant</th><th>Total</th></tr></thead>
-      <tbody>${itemsHtml}</tbody></table><hr>
-      <div style="font-size:11px">
-        <div style="display:flex;justify-content:space-between"><span>Subtotal</span><span>${formatCurrency(receipt.subtotal)}</span></div>
-        ${receipt.discount > 0 ? `<div style="display:flex;justify-content:space-between;color:green"><span>Descuento</span><span>-${formatCurrency(receipt.discount)}</span></div>` : ''}
-        ${receipt.tax > 0 ? `<div style="display:flex;justify-content:space-between"><span>IVA</span><span>${formatCurrency(receipt.tax)}</span></div>` : ''}
-      </div>
-      <div class="total"><span>TOTAL</span><span>${formatCurrency(receipt.total)}</span></div>
-      <hr>${paymentsHtml}
-      ${changeAmt > 0 ? `<div style="display:flex;justify-content:space-between;font-size:11px;font-weight:bold;color:green"><span>Cambio</span><span>${formatCurrency(changeAmt)}</span></div>` : ''}
-      <div style="text-align:center;margin-top:10px;font-size:10px;color:#999">¡Gracias por su compra!</div>
-    </body></html>`)
-    w.document.close()
-    w.focus()
-    setTimeout(() => { w.print(); w.close() }, 350)
+    const itemsHtml = receipt.items.map(i => `
+      <tr>
+        <td style="padding:4px 3px;font-size:10px;word-break:break-word">${i.product_name}</td>
+        <td style="padding:4px 3px;font-size:10px;text-align:center;width:28px">${i.quantity}</td>
+        <td style="padding:4px 3px;font-size:10px;text-align:right;width:55px;white-space:nowrap">${formatCurrency(i.total)}</td>
+      </tr>`).join('')
+    const paymentsHtml = receipt.payments.map(p => `
+      <tr>
+        <td colspan="2" style="padding:2px 3px;font-size:10px">${PAYMENT_LABELS[p.method] ?? p.method}</td>
+        <td style="padding:2px 3px;font-size:10px;text-align:right;white-space:nowrap">${formatCurrency(p.amount)}</td>
+      </tr>`).join('')
+    const html = `<!DOCTYPE html>
+<html lang="es"><head>
+<meta charset="UTF-8">
+<title></title>
+<style>
+  @page{size:80mm auto;margin:0}
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{height:fit-content}
+  body{font-family:Arial,Helvetica,sans-serif;font-size:11px;width:76mm;padding:4mm 3mm;color:#000;height:fit-content}
+  .nombre{text-align:center;font-size:18px;font-weight:900;letter-spacing:1px;margin-bottom:1px}
+  .subtitulo{text-align:center;font-size:11px;margin-bottom:5px}
+  .info{text-align:center;font-size:10px;color:#333;margin-bottom:4px}
+  .cliente{font-size:10px;margin:4px 0;padding:3px 4px;border:1px dashed #aaa}
+  hr{border:none;border-top:1px dashed #777;margin:5px 0}
+  table{width:100%;border-collapse:collapse}
+  thead th{font-size:10px;font-weight:bold;padding:3px 3px;border-bottom:1px dashed #777;text-align:left}
+  thead th:nth-child(2){text-align:center;width:28px}
+  thead th:nth-child(3){text-align:right;width:55px}
+  .subtotal-row td{font-size:10px;padding:2px 3px}
+  .subtotal-row td:last-child{text-align:right;white-space:nowrap}
+  .total-row td{font-size:14px;font-weight:900;padding:4px 3px;border-top:2px solid #000}
+  .total-row td:last-child{text-align:right;white-space:nowrap}
+  .cambio-row td{font-size:12px;font-weight:bold;padding:2px 3px}
+  .cambio-row td:last-child{text-align:right;white-space:nowrap}
+  .footer{text-align:center;margin-top:10px;font-size:9px;color:#555;border-top:1px dashed #777;padding-top:5px}
+</style>
+</head><body>
+  <div class="nombre">Alcaraván</div>
+  <div class="subtitulo">Minimarket – Café</div>
+  <hr>
+  <div class="info">${receipt.date.toLocaleString('es-CO')}<br><b>${receipt.saleNumber}</b></div>
+  ${receipt.customerName ? `<div class="cliente">Cliente: <b>${receipt.customerName}</b></div>` : ''}
+  <hr>
+  <table>
+    <thead><tr><th>Producto</th><th>Cant</th><th>Total</th></tr></thead>
+    <tbody>${itemsHtml}</tbody>
+  </table>
+  <hr>
+  <table>
+    <tr class="subtotal-row"><td colspan="2">Subtotal</td><td>${formatCurrency(receipt.subtotal)}</td></tr>
+    ${receipt.discount > 0 ? `<tr class="subtotal-row"><td colspan="2">Descuento</td><td>-${formatCurrency(receipt.discount)}</td></tr>` : ''}
+    ${receipt.tax > 0 ? `<tr class="subtotal-row"><td colspan="2">IVA</td><td>${formatCurrency(receipt.tax)}</td></tr>` : ''}
+    <tr class="total-row"><td colspan="2">TOTAL</td><td>${formatCurrency(receipt.total)}</td></tr>
+  </table>
+  <hr>
+  <table>
+    ${paymentsHtml}
+    ${changeAmt > 0 ? `
+    <tr class="subtotal-row"><td colspan="2">Recibido</td><td style="text-align:right;white-space:nowrap">${formatCurrency(cashPayment?.received ?? 0)}</td></tr>
+    <tr class="cambio-row"><td colspan="2">Cambio</td><td>${formatCurrency(changeAmt)}</td></tr>` : ''}
+  </table>
+  <div class="footer">¡Gracias por su compra!</div>
+</body></html>`
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const w = window.open(url, '_blank', 'width=420,height=400')
+    if (!w) return
+    w.onload = () => { setTimeout(() => { w.print(); URL.revokeObjectURL(url); openCashDrawer() }, 400) }
+  }
+
+  async function openCashDrawer() {
+    try {
+      // Cargar QZ Tray si no está en la página
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (typeof (window as any).qz === 'undefined') {
+        await new Promise<void>((resolve, reject) => {
+          if (document.querySelector('script[src*="qz-tray"]')) { resolve(); return }
+          const s = document.createElement('script')
+          s.src = 'https://cdn.jsdelivr.net/npm/qz-tray@2.2.4/qz-tray.js'
+          s.onload = () => resolve()
+          s.onerror = () => reject(new Error('no script'))
+          document.head.appendChild(s)
+        })
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const qz = (window as any).qz
+      // Permitir conexión sin certificado (requiere QZ Tray en modo permisivo)
+      qz.security.setCertificatePromise(() => Promise.resolve(''))
+      qz.security.setSignatureAlgorithm('SHA512')
+      qz.security.setSignaturePromise(() => Promise.resolve(''))
+      if (!qz.websocket.isActive()) {
+        await qz.websocket.connect({ retries: 1, delay: 0.5 })
+      }
+      const config = qz.configs.create('GA-E2001')
+      // ESC p 0 – comando apertura cajón monedero estándar
+      await qz.print(config, [{ type: 'raw', format: 'command', data: '\x1B\x70\x00\x19\xFA' }])
+    } catch {
+      // QZ Tray no está instalado o no está activo — el cajón no se abre pero la venta continúa normalmente
+    }
   }
 
   return (
@@ -128,8 +189,9 @@ function ReceiptModal({ receipt, onClose }: { receipt: ReceiptData; onClose: () 
           <div className="print-receipt flex-1 overflow-y-auto p-4">
             {/* Cabecera tienda */}
             <div className="text-center border-b border-dashed border-stone-300 pb-3 mb-3">
-              <p className="font-bold text-lg tracking-wide">ALCARAVÁN</p>
-              <p className="text-xs text-stone-500">Minimarket &amp; Cafetería</p>
+              <p className="font-bold text-lg tracking-wide">Alcaraván</p>
+              <p className="text-xs text-stone-500">Minimarket - Café</p>
+              <p className="text-xs text-stone-500">Minimarket - Café</p>
               <p className="text-xs text-stone-400 mt-1">
                 {receipt.date.toLocaleDateString('es-CO', {
                   day: '2-digit', month: 'long', year: 'numeric'
