@@ -44,70 +44,108 @@ function ReceiptModal({ receipt, onClose }: { receipt: ReceiptData; onClose: () 
   }
 
   function handlePrint() {
-    const w = window.open('', '_blank', 'width=400,height=700')
-    if (!w) { window.print(); return }
     const cashPayment = receipt.payments.find((p) => p.method === 'cash')
     const changeAmt = cashPayment?.received ? cashPayment.received - cashPayment.amount : 0
-    const itemsHtml = receipt.items.map(i => `<tr>
-      <td style="padding:3px 0">${i.product_name}</td>
-      <td style="text-align:center;padding:3px 4px">${i.quantity}</td>
-      <td style="text-align:right;padding:3px 0">${formatCurrency(i.total)}</td>
-    </tr>`).join('')
-    const paymentsHtml = receipt.payments.map(p => `<div style="display:flex;justify-content:space-between;font-size:11px">
-      <span>${PAYMENT_LABELS[p.method] ?? p.method}</span><span>${formatCurrency(p.amount)}</span>
-    </div>`).join('')
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><style>
-      @page{margin:2mm}
-      body{font-family:Arial,sans-serif;font-size:11px;width:70mm;margin:0 auto;padding:6px;color:#000}
-      h2{text-align:center;margin:4px 0;font-size:15px;font-weight:bold}
-      .sub{text-align:center;font-size:10px;color:#444;margin-bottom:6px}
-      hr{border:none;border-top:1px dashed #999;margin:5px 0}
-      table{width:100%;border-collapse:collapse;font-size:10px}
-      th{font-size:10px;font-weight:bold;padding:3px 2px;border-bottom:1px dashed #999}
-      th.prod{text-align:left;width:60%}
-      th.qty{text-align:center;width:15%}
-      th.price{text-align:right;width:25%}
-      td.prod{text-align:left;padding:3px 2px;word-break:break-word}
-      td.qty{text-align:center;padding:3px 2px}
-      td.price{text-align:right;padding:3px 2px}
-      .totrow{display:table;width:100%;font-size:10px;margin:2px 0}
-      .totrow span:first-child{display:table-cell;text-align:left}
-      .totrow span:last-child{display:table-cell;text-align:right}
-      .grandtotal{display:table;width:100%;font-size:13px;font-weight:bold;margin-top:4px}
-      .grandtotal span:first-child{display:table-cell;text-align:left}
-      .grandtotal span:last-child{display:table-cell;text-align:right}
-      .cambio{display:table;width:100%;font-size:12px;font-weight:bold}
-      .cambio span:first-child{display:table-cell;text-align:left}
-      .cambio span:last-child{display:table-cell;text-align:right}
-      .footer{text-align:center;margin-top:8px;font-size:9px;color:#666}
-    </style></head><body>
-      <h2>Alcarav&aacute;n</h2>
-      <div class="sub">Minimarket - Caf&eacute;<br>
-      ${receipt.date.toLocaleString('es-CO')}<br><b>${receipt.saleNumber}</b></div>
-      ${receipt.customerName ? `<div style="font-size:10px;margin-bottom:4px">Cliente: <b>${receipt.customerName}</b></div>` : ''}
-      <table>
-        <thead><tr><th class="prod">Producto</th><th class="qty">Cant</th><th class="price">Total</th></tr></thead>
-        <tbody>
-          ${receipt.items.map(i => `<tr>
-            <td class="prod">${i.product_name}</td>
-            <td class="qty">${i.quantity}</td>
-            <td class="price">${formatCurrency(i.total)}</td>
-          </tr>`).join('')}
-        </tbody>
-      </table>
-      <hr>
-      <div class="totrow"><span>Subtotal</span><span>${formatCurrency(receipt.subtotal)}</span></div>
-      ${receipt.discount > 0 ? `<div class="totrow"><span>Descuento</span><span>-${formatCurrency(receipt.discount)}</span></div>` : ''}
-      ${receipt.tax > 0 ? `<div class="totrow"><span>IVA</span><span>${formatCurrency(receipt.tax)}</span></div>` : ''}
-      <div class="grandtotal"><span>TOTAL</span><span>${formatCurrency(receipt.total)}</span></div>
-      <hr>
-      ${receipt.payments.map(p => `<div class="totrow"><span>${PAYMENT_LABELS[p.method] ?? p.method}</span><span>${formatCurrency(p.amount)}</span></div>`).join('')}
-      ${changeAmt > 0 ? `<div class="totrow"><span>Recibido</span><span>${formatCurrency(cashPayment?.received ?? 0)}</span></div><div class="cambio"><span>Cambio</span><span>${formatCurrency(changeAmt)}</span></div>` : ''}
-      <div class="footer">&#161;Gracias por su compra!</div>
-    </body></html>`)
-    w.document.close()
-    w.focus()
-    setTimeout(() => { w.print(); w.close() }, 350)
+    const itemsHtml = receipt.items.map(i => `
+      <tr>
+        <td style="padding:4px 3px;font-size:10px;word-break:break-word">${i.product_name}</td>
+        <td style="padding:4px 3px;font-size:10px;text-align:center;width:28px">${i.quantity}</td>
+        <td style="padding:4px 3px;font-size:10px;text-align:right;width:55px;white-space:nowrap">${formatCurrency(i.total)}</td>
+      </tr>`).join('')
+    const paymentsHtml = receipt.payments.map(p => `
+      <tr>
+        <td colspan="2" style="padding:2px 3px;font-size:10px">${PAYMENT_LABELS[p.method] ?? p.method}</td>
+        <td style="padding:2px 3px;font-size:10px;text-align:right;white-space:nowrap">${formatCurrency(p.amount)}</td>
+      </tr>`).join('')
+    const html = `<!DOCTYPE html>
+<html lang="es"><head>
+<meta charset="UTF-8">
+<title></title>
+<style>
+  @page{size:80mm auto;margin:0}
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{height:fit-content}
+  body{font-family:Arial,Helvetica,sans-serif;font-size:11px;width:76mm;padding:4mm 3mm;color:#000;height:fit-content}
+  .nombre{text-align:center;font-size:18px;font-weight:900;letter-spacing:1px;margin-bottom:1px}
+  .subtitulo{text-align:center;font-size:11px;margin-bottom:5px}
+  .info{text-align:center;font-size:10px;color:#333;margin-bottom:4px}
+  .cliente{font-size:10px;margin:4px 0;padding:3px 4px;border:1px dashed #aaa}
+  hr{border:none;border-top:1px dashed #777;margin:5px 0}
+  table{width:100%;border-collapse:collapse}
+  thead th{font-size:10px;font-weight:bold;padding:3px 3px;border-bottom:1px dashed #777;text-align:left}
+  thead th:nth-child(2){text-align:center;width:28px}
+  thead th:nth-child(3){text-align:right;width:55px}
+  .subtotal-row td{font-size:10px;padding:2px 3px}
+  .subtotal-row td:last-child{text-align:right;white-space:nowrap}
+  .total-row td{font-size:14px;font-weight:900;padding:4px 3px;border-top:2px solid #000}
+  .total-row td:last-child{text-align:right;white-space:nowrap}
+  .cambio-row td{font-size:12px;font-weight:bold;padding:2px 3px}
+  .cambio-row td:last-child{text-align:right;white-space:nowrap}
+  .footer{text-align:center;margin-top:10px;font-size:9px;color:#555;border-top:1px dashed #777;padding-top:5px}
+</style>
+</head><body>
+  <div class="nombre">Alcaraván</div>
+  <div class="subtitulo">Minimarket – Café</div>
+  <hr>
+  <div class="info">${receipt.date.toLocaleString('es-CO')}<br><b>${receipt.saleNumber}</b></div>
+  ${receipt.customerName ? `<div class="cliente">Cliente: <b>${receipt.customerName}</b></div>` : ''}
+  <hr>
+  <table>
+    <thead><tr><th>Producto</th><th>Cant</th><th>Total</th></tr></thead>
+    <tbody>${itemsHtml}</tbody>
+  </table>
+  <hr>
+  <table>
+    <tr class="subtotal-row"><td colspan="2">Subtotal</td><td>${formatCurrency(receipt.subtotal)}</td></tr>
+    ${receipt.discount > 0 ? `<tr class="subtotal-row"><td colspan="2">Descuento</td><td>-${formatCurrency(receipt.discount)}</td></tr>` : ''}
+    ${receipt.tax > 0 ? `<tr class="subtotal-row"><td colspan="2">IVA</td><td>${formatCurrency(receipt.tax)}</td></tr>` : ''}
+    <tr class="total-row"><td colspan="2">TOTAL</td><td>${formatCurrency(receipt.total)}</td></tr>
+  </table>
+  <hr>
+  <table>
+    ${paymentsHtml}
+    ${changeAmt > 0 ? `
+    <tr class="subtotal-row"><td colspan="2">Recibido</td><td style="text-align:right;white-space:nowrap">${formatCurrency(cashPayment?.received ?? 0)}</td></tr>
+    <tr class="cambio-row"><td colspan="2">Cambio</td><td>${formatCurrency(changeAmt)}</td></tr>` : ''}
+  </table>
+  <div class="footer">¡Gracias por su compra!</div>
+</body></html>`
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const w = window.open(url, '_blank', 'width=420,height=400')
+    if (!w) return
+    w.onload = () => { setTimeout(() => { w.print(); URL.revokeObjectURL(url); openCashDrawer() }, 400) }
+  }
+
+  async function openCashDrawer() {
+    try {
+      // Cargar QZ Tray si no está en la página
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (typeof (window as any).qz === 'undefined') {
+        await new Promise<void>((resolve, reject) => {
+          if (document.querySelector('script[src*="qz-tray"]')) { resolve(); return }
+          const s = document.createElement('script')
+          s.src = 'https://cdn.jsdelivr.net/npm/qz-tray@2.2.4/qz-tray.js'
+          s.onload = () => resolve()
+          s.onerror = () => reject(new Error('no script'))
+          document.head.appendChild(s)
+        })
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const qz = (window as any).qz
+      // Permitir conexión sin certificado (requiere QZ Tray en modo permisivo)
+      qz.security.setCertificatePromise(() => Promise.resolve(''))
+      qz.security.setSignatureAlgorithm('SHA512')
+      qz.security.setSignaturePromise(() => Promise.resolve(''))
+      if (!qz.websocket.isActive()) {
+        await qz.websocket.connect({ retries: 1, delay: 0.5 })
+      }
+      const config = qz.configs.create('GA-E2001')
+      // ESC p 0 – comando apertura cajón monedero estándar
+      await qz.print(config, [{ type: 'raw', format: 'command', data: '\x1B\x70\x00\x19\xFA' }])
+    } catch {
+      // QZ Tray no está instalado o no está activo — el cajón no se abre pero la venta continúa normalmente
+    }
   }
 
   return (
