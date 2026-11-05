@@ -405,7 +405,8 @@ export default function CajaPage() {
         card_sales: card,
         other_sales: other,
         sale_count: sales.length,
-        sales: sales as DailySummary['sales'],
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        sales: (sales as any[]).map(s => ({ ...s, payments: s.sale_payments ?? [] })) as DailySummary['sales'],
       })
     } catch (err) {
       console.error(err)
