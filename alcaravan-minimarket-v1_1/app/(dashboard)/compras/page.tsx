@@ -9,6 +9,7 @@ interface Purchase {
   purchase_number: string
   total: number
   status: string
+  payment_method?: string
   created_at: string
   notes?: string
   supplier?: { name: string }
@@ -46,6 +47,7 @@ function NuevaCompraModal({
 }) {
   const supabase = createClient()
   const [supplierId, setSupplierId] = useState('')
+  const [paymentMethod, setPaymentMethod] = useState('cash')
   const [notes, setNotes] = useState('')
   const [items, setItems] = useState<PurchaseItem[]>([])
   const [search, setSearch] = useState('')
@@ -121,6 +123,7 @@ function NuevaCompraModal({
           total,
           subtotal: total,
           status: 'received',
+          payment_method: paymentMethod,
           notes: notes || null,
         })
         .select('id')
@@ -274,6 +277,32 @@ function NuevaCompraModal({
               </div>
             </div>
           )}
+
+          {/* Método de pago */}
+          <div>
+            <label className="block text-sm font-medium text-stone-700 mb-1">Pagado con</label>
+            <div className="grid grid-cols-4 gap-2">
+              {[
+                { key: 'cash', label: '💵 Efectivo' },
+                { key: 'nequi', label: '📱 Nequi' },
+                { key: 'transfer', label: '🏦 Transferencia' },
+                { key: 'credit', label: '📋 Crédito' },
+              ].map(opt => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setPaymentMethod(opt.key)}
+                  className={`py-2 px-2 rounded-xl text-xs font-medium text-center transition-all border ${
+                    paymentMethod === opt.key
+                      ? 'bg-amber-700 text-white border-amber-700'
+                      : 'bg-stone-50 text-stone-600 border-stone-200 hover:border-amber-300'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
 
           {/* Notas */}
           <div>
@@ -439,6 +468,7 @@ export default function ComprasPage() {
                 <th className="text-left px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">Proveedor</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">Fecha</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">Estado</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">Pago</th>
                 <th className="text-right px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">Total</th>
                 <th className="px-4 py-3" />
               </tr>
@@ -454,6 +484,13 @@ export default function ComprasPage() {
                     <td className="px-4 py-3 text-stone-500 text-sm">{formatDate(p.created_at)}</td>
                     <td className="px-4 py-3">
                       <span className={`text-xs px-2 py-1 rounded-full font-medium ${st.color}`}>{st.label}</span>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-stone-500">
+                      {p.payment_method === 'cash' ? '💵 Efectivo'
+                        : p.payment_method === 'nequi' ? '📱 Nequi'
+                        : p.payment_method === 'transfer' ? '🏦 Transferencia'
+                        : p.payment_method === 'credit' ? '📋 Crédito'
+                        : '—'}
                     </td>
                     <td className="px-4 py-3 text-right font-bold text-stone-800">{formatCurrency(p.total)}</td>
                     <td className="px-4 py-3 text-right">
