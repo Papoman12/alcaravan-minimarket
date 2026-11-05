@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency } from '@/lib/utils'
+import { getColombiaDateUTCRange } from '@/lib/colombia-time'
 
 // ─── Tipos ──────────────────────────────────────────────────────────
 interface SaleItem {
@@ -73,7 +74,9 @@ function getCustomerName(c?: Sale['customers']) {
 }
 
 function formatDate(d: string) {
+  // Siempre mostrar en hora Colombia (UTC-5)
   return new Date(d).toLocaleString('es-CO', {
+    timeZone: 'America/Bogota',
     day: '2-digit', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   })
@@ -668,8 +671,16 @@ export default function VentasPage() {
       .limit(200)
 
     if (statusFilter !== 'all') q = q.eq('status', statusFilter)
-    if (dateFrom) q = q.gte('created_at', dateFrom)
-    if (dateTo)   q = q.lte('created_at', dateTo + 'T23:59:59')
+    // ── Filtro por fecha usando zona horaria Colombia (UTC-5) ───────────────
+    // Sin esto, ventas hechas después de las 7 PM aparecen en el día siguiente (UTC)
+    if (dateFrom) {
+      const { from } = getColombiaDateUTCRange(dateFrom)
+      q = q.gte('created_at', from)
+    }
+    if (dateTo) {
+      const { to } = getColombiaDateUTCRange(dateTo)
+      q = q.lt('created_at', to)
+    }
 
     const { data } = await q
     const rows: Sale[] = (data ?? []).map((s: any) => {
