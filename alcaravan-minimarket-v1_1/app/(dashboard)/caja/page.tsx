@@ -36,9 +36,13 @@ import { formatCurrency } from '@/lib/utils'
 import {
   getColombiaDate,
   getColombiaDateUTCRange,
-  formatColombiaDateTime,
   formatColombiaTime,
 } from '@/lib/colombia-time'
+
+// ─── PIN de administrador ─────────────────────────────────────────────────────
+// Cambia este valor por el PIN que quieras usar en tu negocio.
+// Solo quien conozca este PIN puede corregir el monto de apertura.
+const ADMIN_PIN = '1234'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -344,7 +348,6 @@ export default function CajaPage() {
   const [egresos, setEgresos] = useState<DailyEgresos>({
     cash_purchases: 0, nequi_purchases: 0, cash_expenses: 0, nequi_expenses: 0,
   })
-  const [isAdmin, setIsAdmin] = useState(false)
   const [loading, setLoading] = useState(true)
   const [showAbrir, setShowAbrir] = useState(false)
   const [showCerrar, setShowCerrar] = useState(false)
@@ -359,18 +362,6 @@ export default function CajaPage() {
     setError('')
 
     try {
-      // Verificar si el usuario es administrador
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
-        const { data: profile } = await supabase
-          .from('users')
-          .select('role:roles(name)')
-          .eq('id', user.id)
-          .single()
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setIsAdmin((profile?.role as any)?.name === 'admin')
-      }
-
       // Buscar sesión de hoy
       const { data: sessionData, error: sessionError } = await supabase
         .from('cash_sessions')
@@ -500,11 +491,19 @@ export default function CajaPage() {
     setShowAbrir(false)
   }
 
-  // ── Corregir monto de apertura ─────────────────────────────────────────────
+  // ── Corregir monto de apertura (protegido por PIN de admin) ───────────────
   async function handleEditApertura() {
     if (!session) return
+    // Verificar PIN de administrador
+    const pin = prompt('🔐 Ingresa el PIN de administrador para continuar:')
+    if (pin === null) return // Canceló
+    if (pin.trim() !== ADMIN_PIN) {
+      alert('❌ PIN incorrecto. Solo los administradores pueden corregir la apertura.')
+      return
+    }
+    // PIN correcto → pedir el monto nuevo
     const input = prompt(
-      `Monto actual de apertura: $${session.opening_amount.toLocaleString('es-CO')}\n\nIngresa el monto correcto:`,
+      `✏️ Corregir apertura\n\nMonto actual: $${session.opening_amount.toLocaleString('es-CO')}\n\nIngresa el monto correcto:`,
       String(session.opening_amount)
     )
     if (input === null) return
@@ -656,11 +655,11 @@ CREATE POLICY "Authenticated users can manage cash_sessions"
                 <p className="text-lg font-bold text-stone-800">
                   {formatCurrency(session.opening_amount)}
                 </p>
-                {session.status === 'open' && isAdmin && (
+                {session.status === 'open' && (
                   <button
                     onClick={handleEditApertura}
                     className="text-xs text-stone-400 hover:text-amber-700 transition-colors px-1.5 py-0.5 rounded-lg hover:bg-amber-50 border border-transparent hover:border-amber-200"
-                    title="Corregir monto de apertura (solo administrador)"
+                    title="Corregir monto de apertura (requiere PIN de administrador)"
                   >
                     ✏️ corregir
                   </button>
