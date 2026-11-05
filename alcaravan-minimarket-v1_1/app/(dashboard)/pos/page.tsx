@@ -902,7 +902,7 @@ export default function POSPage() {
             <h3 className="font-bold text-stone-800">Carrito</h3>
             {items.length > 0 && (
               <button
-                onClick={suspendCart}
+                onClick={() => suspendCart()}
                 className="text-xs px-3 py-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-600 transition-colors"
               >
                 ⏸ Suspender
