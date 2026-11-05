@@ -84,7 +84,8 @@ function ConsumoInternoModal({ onClose, onSaved }: { onClose: () => void; onSave
           cost_price: item.product.purchase_price,
           total_cost: item.product.purchase_price * item.quantity,
           reason: item.reason || 'Consumo interno',
-        }).throwOnError().then(() => {}).catch(() => {}) // silencioso si la tabla no existe
+        // eslint-disable-next-line @typescript-eslint/no-empty-function
+        }).then(() => {}).catch(() => {}) // silencioso si la tabla no existe
       }
       onSaved()
     } catch (e) {
