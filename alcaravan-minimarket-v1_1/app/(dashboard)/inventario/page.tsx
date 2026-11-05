@@ -1,8 +1,214 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency } from '@/lib/utils'
+
+// ─── Modal: Consumo Interno ───────────────────────────────────────────────────
+// Para registrar productos usados por la tienda (leche para café, escoba, etc.)
+// Se descuentan del inventario al precio de COSTO, no al precio de venta.
+
+interface ConsumoItem {
+  product: Product
+  quantity: number
+  reason: string
+}
+
+function ConsumoInternoModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const supabase = createClient()
+  const [search, setSearch] = useState('')
+  const [results, setResults] = useState<Product[]>([])
+  const [items, setItems] = useState<ConsumoItem[]>([])
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const searchRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    searchRef.current?.focus()
+  }, [])
+
+  useEffect(() => {
+    if (!search.trim() || search.length < 2) { setResults([]); return }
+    const timer = setTimeout(async () => {
+      const { data } = await supabase
+        .from('products')
+        .select('id, name, code, barcode, purchase_price, sale_price, stock, min_stock, is_active, category:categories(name), unit:units_of_measure(abbreviation)')
+        .eq('is_active', true)
+        .or(`name.ilike.%${search}%,code.ilike.%${search}%`)
+        .order('name').limit(8)
+      setResults((data ?? []) as unknown as Product[])
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [search])
+
+  function addProduct(p: Product) {
+    if (items.find(i => i.product.id === p.id)) return
+    setItems(prev => [...prev, { product: p, quantity: 1, reason: '' }])
+    setSearch(''); setResults([])
+  }
+
+  function updateItem(id: string, field: 'quantity' | 'reason', value: string | number) {
+    setItems(prev => prev.map(i => i.product.id === id ? { ...i, [field]: value } : i))
+  }
+
+  function removeItem(id: string) {
+    setItems(prev => prev.filter(i => i.product.id !== id))
+  }
+
+  const totalCosto = items.reduce((s, i) => s + i.product.purchase_price * i.quantity, 0)
+
+  async function handleSave() {
+    if (items.length === 0) return
+    for (const item of items) {
+      if (item.quantity <= 0) { setError('Verifica las cantidades — deben ser mayores a 0.'); return }
+      if (item.quantity > item.product.stock) {
+        setError(`"${item.product.name}" solo tiene ${item.product.stock} en stock.`); return
+      }
+    }
+
+    setSaving(true); setError('')
+    try {
+      for (const item of items) {
+        // Descontar del stock
+        await supabase
+          .from('products')
+          .update({ stock: item.product.stock - item.quantity })
+          .eq('id', item.product.id)
+
+        // Registrar movimiento (si la tabla existe)
+        await supabase.from('inventory_adjustments').insert({
+          product_id: item.product.id,
+          product_name: item.product.name,
+          type: 'consumo_interno',
+          quantity: -item.quantity,
+          cost_price: item.product.purchase_price,
+          total_cost: item.product.purchase_price * item.quantity,
+          reason: item.reason || 'Consumo interno',
+        }).throwOnError().then(() => {}).catch(() => {}) // silencioso si la tabla no existe
+      }
+      onSaved()
+    } catch (e) {
+      console.error(e)
+      setError('Error al guardar. Intenta de nuevo.')
+    }
+    setSaving(false)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg my-4">
+        <div className="px-6 py-5 border-b border-stone-100">
+          <h2 className="text-xl font-bold text-stone-800">🏪 Consumo Interno</h2>
+          <p className="text-stone-500 text-sm mt-1">
+            Productos usados por la tienda — se descuentan al precio de costo
+          </p>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {/* Buscador */}
+          <div className="relative">
+            <input
+              ref={searchRef}
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Buscar producto (leche, escoba, papel...)"
+              className="w-full px-4 py-3 rounded-xl border-2 border-amber-700 focus:outline-none text-sm"
+            />
+            {results.length > 0 && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl border border-stone-200 shadow-xl z-20 max-h-48 overflow-y-auto">
+                {results.map(p => (
+                  <button
+                    key={p.id}
+                    onClick={() => addProduct(p)}
+                    className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-amber-50 text-left border-b border-stone-50 last:border-0"
+                  >
+                    <div>
+                      <p className="text-sm font-medium text-stone-800">{p.name}</p>
+                      <p className="text-xs text-stone-400">Stock: {p.stock} · Costo: {formatCurrency(p.purchase_price)}</p>
+                    </div>
+                    <span className="text-amber-700 text-lg ml-2">+</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Items agregados */}
+          {items.length === 0 && (
+            <p className="text-center text-stone-400 text-sm py-4">
+              Busca y agrega los productos que vas a usar
+            </p>
+          )}
+
+          {items.map(item => (
+            <div key={item.product.id} className="bg-stone-50 rounded-xl p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-stone-800 text-sm">{item.product.name}</p>
+                  <p className="text-xs text-stone-500">
+                    Costo: {formatCurrency(item.product.purchase_price)} · Stock actual: {item.product.stock}
+                  </p>
+                </div>
+                <button onClick={() => removeItem(item.product.id)} className="text-red-400 hover:text-red-600 ml-2 text-lg">✕</button>
+              </div>
+              <div className="flex gap-2">
+                <div className="w-28">
+                  <label className="text-xs text-stone-500 mb-0.5 block">Cantidad</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max={item.product.stock}
+                    value={item.quantity}
+                    onChange={e => updateItem(item.product.id, 'quantity', parseFloat(e.target.value) || 1)}
+                    className="w-full px-3 py-2 rounded-lg border border-stone-200 text-sm font-bold text-center focus:outline-none focus:ring-2 focus:ring-amber-700"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="text-xs text-stone-500 mb-0.5 block">¿Para qué se usa?</label>
+                  <input
+                    type="text"
+                    value={item.reason}
+                    onChange={e => updateItem(item.product.id, 'reason', e.target.value)}
+                    placeholder="Ej: cappuccino, limpieza, cocina..."
+                    className="w-full px-3 py-2 rounded-lg border border-stone-200 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700"
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-right text-stone-500">
+                Costo total: <span className="font-bold text-stone-700">{formatCurrency(item.product.purchase_price * item.quantity)}</span>
+              </p>
+            </div>
+          ))}
+
+          {items.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex justify-between items-center">
+              <span className="text-sm text-amber-800 font-medium">Costo total del consumo</span>
+              <span className="text-lg font-bold text-amber-800">{formatCurrency(totalCosto)}</span>
+            </div>
+          )}
+
+          {error && (
+            <p className="text-red-600 text-sm bg-red-50 border border-red-200 rounded-xl px-3 py-2">{error}</p>
+          )}
+        </div>
+
+        <div className="px-6 pb-6 flex gap-3">
+          <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-stone-200 text-stone-600 font-medium hover:bg-stone-50 transition-colors">
+            Cancelar
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving || items.length === 0}
+            className="flex-1 py-3 rounded-xl bg-amber-700 text-white font-bold hover:bg-amber-800 disabled:bg-stone-300 transition-colors"
+          >
+            {saving ? 'Guardando...' : '✓ Registrar consumo'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 interface Product {
   id: string
@@ -64,22 +270,24 @@ export default function InventarioPage() {
   const [filter, setFilter] = useState<'all' | 'low' | 'out'>('all')
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [categories, setCategories] = useState<string[]>([])
+  const [showConsumo, setShowConsumo] = useState(false)
+
+  async function load() {
+    setLoading(true)
+    const supabase = createClient()
+    const { data } = await supabase
+      .from('products')
+      .select('id, name, code, barcode, purchase_price, sale_price, stock, min_stock, is_active, category:categories(name), unit:units_of_measure(abbreviation)')
+      .order('name')
+      .limit(500)
+    const rows = (data ?? []) as unknown as Product[]
+    setProducts(rows)
+    const cats = [...new Set(rows.map(p => p.category?.name).filter(Boolean))] as string[]
+    setCategories(cats.sort())
+    setLoading(false)
+  }
 
   useEffect(() => {
-    async function load() {
-      setLoading(true)
-      const supabase = createClient()
-      const { data } = await supabase
-        .from('products')
-        .select('id, name, code, barcode, purchase_price, sale_price, stock, min_stock, is_active, category:categories(name), unit:units_of_measure(abbreviation)')
-        .order('name')
-        .limit(500)
-      const rows = (data ?? []) as unknown as Product[]
-      setProducts(rows)
-      const cats = [...new Set(rows.map(p => p.category?.name).filter(Boolean))] as string[]
-      setCategories(cats.sort())
-      setLoading(false)
-    }
     load()
   }, [])
 
@@ -108,12 +316,20 @@ export default function InventarioPage() {
           <h1 className="text-2xl font-bold text-stone-800">Inventario</h1>
           <p className="text-stone-500 text-sm mt-0.5">{totalProductos} productos</p>
         </div>
-        <button
-          onClick={() => downloadCSV(filtered)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-xl font-semibold hover:bg-emerald-700 transition-colors shadow-sm"
-        >
-          📥 Descargar Excel ({filtered.length})
-        </button>
+        <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={() => setShowConsumo(true)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 transition-colors shadow-sm"
+          >
+            🏪 Consumo Interno
+          </button>
+          <button
+            onClick={() => downloadCSV(filtered)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-xl font-semibold hover:bg-emerald-700 transition-colors shadow-sm"
+          >
+            📥 Descargar Excel ({filtered.length})
+          </button>
+        </div>
       </div>
 
       {/* Tarjetas resumen */}
@@ -240,6 +456,14 @@ export default function InventarioPage() {
             })}
           </div>
         </div>
+      )}
+
+      {/* Modal consumo interno */}
+      {showConsumo && (
+        <ConsumoInternoModal
+          onClose={() => setShowConsumo(false)}
+          onSaved={() => { setShowConsumo(false); load() }}
+        />
       )}
     </div>
   )
