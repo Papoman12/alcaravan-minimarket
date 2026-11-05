@@ -75,8 +75,8 @@ function ConsumoInternoModal({ onClose, onSaved }: { onClose: () => void; onSave
           .update({ stock: item.product.stock - item.quantity })
           .eq('id', item.product.id)
 
-        // Registrar movimiento (si la tabla existe)
-        await supabase.from('inventory_adjustments').insert({
+        // Registrar movimiento (si la tabla existe) — silencioso si falla
+        await Promise.resolve(supabase.from('inventory_adjustments').insert({
           product_id: item.product.id,
           product_name: item.product.name,
           type: 'consumo_interno',
@@ -84,8 +84,7 @@ function ConsumoInternoModal({ onClose, onSaved }: { onClose: () => void; onSave
           cost_price: item.product.purchase_price,
           total_cost: item.product.purchase_price * item.quantity,
           reason: item.reason || 'Consumo interno',
-        // eslint-disable-next-line @typescript-eslint/no-empty-function
-        }).then(() => {}).catch(() => {}) // silencioso si la tabla no existe
+        })).catch(() => {})
       }
       onSaved()
     } catch (e) {
