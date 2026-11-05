@@ -1,1144 +1,748 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+/**
+ * Caja — Apertura, cierre y arqueo diario
+ *
+ * Flujo:
+ *  1. Al inicio del día: cajero ingresa el efectivo con que abre la caja.
+ *  2. Durante el día: las ventas se acumulan automáticamente.
+ *  3. Al cierre: cajero cuenta el efectivo, el sistema muestra el arqueo
+ *     (esperado vs real) y registra el cierre.
+ *
+ * Zona horaria: Colombia UTC-5. Supabase guarda en UTC, pero el "día"
+ * se calcula según Colombia para evitar el bug de las 7pm.
+ *
+ * Tabla requerida en Supabase (ejecutar en SQL Editor si no existe):
+ *
+ *   CREATE TABLE IF NOT EXISTS cash_sessions (
+ *     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+ *     date          DATE NOT NULL,          -- fecha Colombia YYYY-MM-DD
+ *     opened_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+ *     closed_at     TIMESTAMPTZ,
+ *     opening_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+ *     closing_amount NUMERIC(12,2),
+ *     expected_cash  NUMERIC(12,2),
+ *     difference     NUMERIC(12,2),
+ *     notes         TEXT,
+ *     status        TEXT NOT NULL DEFAULT 'open'
+ *                   CHECK (status IN ('open','closed')),
+ *     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+ *   );
+ */
+
+import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useCartStore } from '@/store/cartStore'
 import { formatCurrency } from '@/lib/utils'
-import type { Product, Customer, CartPayment, PaymentMethod, CartItem } from '@/types/database'
+import {
+  getColombiaDate,
+  getColombiaDateUTCRange,
+  formatColombiaDateTime,
+  formatColombiaTime,
+} from '@/lib/colombia-time'
 
-// ─── Datos del recibo ────────────────────────────────────────────────
-interface ReceiptData {
-  saleNumber: string
-  date: Date
-  items: {
-    product_name: string
-    quantity: number
-    unit_price: number
+// ─── Tipos ────────────────────────────────────────────────────────────────────
+
+interface CashSession {
+  id: string
+  date: string
+  opened_at: string
+  closed_at: string | null
+  opening_amount: number
+  closing_amount: number | null
+  expected_cash: number | null
+  difference: number | null
+  notes: string | null
+  status: 'open' | 'closed'
+}
+
+interface DailySummary {
+  total_sales: number
+  cash_sales: number
+  nequi_sales: number
+  transfer_sales: number
+  card_sales: number
+  other_sales: number
+  sale_count: number
+  sales: {
+    id: string
+    sale_number: string
     total: number
+    created_at: string
+    payments: { payment_method: string; amount: number }[]
   }[]
-  subtotal: number
-  discount: number
-  tax: number
-  total: number
-  payments: CartPayment[]
-  customerName?: string
-  notes?: string
 }
 
-// ─── Componente: Recibo / Ticket ─────────────────────────────────────
-function ReceiptModal({ receipt, onClose }: { receipt: ReceiptData; onClose: () => void }) {
-  const cashPayment = receipt.payments.find((p) => p.method === 'cash')
-  const change = cashPayment?.received
-    ? cashPayment.received - cashPayment.amount
-    : 0
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-  const PAYMENT_LABELS: Record<string, string> = {
-    cash: 'Efectivo',
-    card_debit: 'Débito',
-    card_credit: 'Crédito',
-    transfer: 'Transferencia',
-    nequi: 'Nequi',
-    daviplata: 'Daviplata',
-    bancolombia: 'Bancolombia',
-    other: 'Otro',
-  }
-
-  function handlePrint() {
-    const cashPayment = receipt.payments.find((p) => p.method === 'cash')
-    const changeAmt = cashPayment?.received ? cashPayment.received - cashPayment.amount : 0
-    const itemsHtml = receipt.items.map(i => `
-      <tr>
-        <td style="padding:4px 3px;font-size:10px;word-break:break-word">${i.product_name}</td>
-        <td style="padding:4px 3px;font-size:10px;text-align:center;width:28px">${i.quantity}</td>
-        <td style="padding:4px 3px;font-size:10px;text-align:right;width:55px;white-space:nowrap">${formatCurrency(i.total)}</td>
-      </tr>`).join('')
-    const paymentsHtml = receipt.payments.map(p => `
-      <tr>
-        <td colspan="2" style="padding:2px 3px;font-size:10px">${PAYMENT_LABELS[p.method] ?? p.method}</td>
-        <td style="padding:2px 3px;font-size:10px;text-align:right;white-space:nowrap">${formatCurrency(p.amount)}</td>
-      </tr>`).join('')
-    const html = `<!DOCTYPE html>
-<html lang="es"><head>
-<meta charset="UTF-8">
-<title></title>
-<style>
-  @page{size:80mm auto;margin:0}
-  *{margin:0;padding:0;box-sizing:border-box}
-  html{height:fit-content}
-  body{font-family:Arial,Helvetica,sans-serif;font-size:11px;width:76mm;padding:4mm 3mm;color:#000;height:fit-content}
-  .nombre{text-align:center;font-size:18px;font-weight:900;letter-spacing:1px;margin-bottom:1px}
-  .subtitulo{text-align:center;font-size:11px;margin-bottom:5px}
-  .info{text-align:center;font-size:10px;color:#333;margin-bottom:4px}
-  .cliente{font-size:10px;margin:4px 0;padding:3px 4px;border:1px dashed #aaa}
-  hr{border:none;border-top:1px dashed #777;margin:5px 0}
-  table{width:100%;border-collapse:collapse}
-  thead th{font-size:10px;font-weight:bold;padding:3px 3px;border-bottom:1px dashed #777;text-align:left}
-  thead th:nth-child(2){text-align:center;width:28px}
-  thead th:nth-child(3){text-align:right;width:55px}
-  .subtotal-row td{font-size:10px;padding:2px 3px}
-  .subtotal-row td:last-child{text-align:right;white-space:nowrap}
-  .total-row td{font-size:14px;font-weight:900;padding:4px 3px;border-top:2px solid #000}
-  .total-row td:last-child{text-align:right;white-space:nowrap}
-  .cambio-row td{font-size:12px;font-weight:bold;padding:2px 3px}
-  .cambio-row td:last-child{text-align:right;white-space:nowrap}
-  .footer{text-align:center;margin-top:10px;font-size:9px;color:#555;border-top:1px dashed #777;padding-top:5px}
-</style>
-</head><body>
-  <div class="nombre">Alcaraván</div>
-  <div class="subtitulo">Minimarket – Café</div>
-  <hr>
-  <div class="info">${receipt.date.toLocaleString('es-CO')}<br><b>${receipt.saleNumber}</b></div>
-  ${receipt.customerName ? `<div class="cliente">Cliente: <b>${receipt.customerName}</b></div>` : ''}
-  <hr>
-  <table>
-    <thead><tr><th>Producto</th><th>Cant</th><th>Total</th></tr></thead>
-    <tbody>${itemsHtml}</tbody>
-  </table>
-  <hr>
-  <table>
-    <tr class="subtotal-row"><td colspan="2">Subtotal</td><td>${formatCurrency(receipt.subtotal)}</td></tr>
-    ${receipt.discount > 0 ? `<tr class="subtotal-row"><td colspan="2">Descuento</td><td>-${formatCurrency(receipt.discount)}</td></tr>` : ''}
-    ${receipt.tax > 0 ? `<tr class="subtotal-row"><td colspan="2">IVA</td><td>${formatCurrency(receipt.tax)}</td></tr>` : ''}
-    <tr class="total-row"><td colspan="2">TOTAL</td><td>${formatCurrency(receipt.total)}</td></tr>
-  </table>
-  <hr>
-  <table>
-    ${paymentsHtml}
-    ${changeAmt > 0 ? `
-    <tr class="subtotal-row"><td colspan="2">Recibido</td><td style="text-align:right;white-space:nowrap">${formatCurrency(cashPayment?.received ?? 0)}</td></tr>
-    <tr class="cambio-row"><td colspan="2">Cambio</td><td>${formatCurrency(changeAmt)}</td></tr>` : ''}
-  </table>
-  <div class="footer">¡Gracias por su compra!</div>
-</body></html>`
-    const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const w = window.open(url, '_blank', 'width=420,height=400')
-    if (!w) return
-    w.onload = () => { setTimeout(() => { w.print(); URL.revokeObjectURL(url); openCashDrawer() }, 400) }
-  }
-
-  async function openCashDrawer() {
-    try {
-      // Cargar QZ Tray si no está en la página
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if (typeof (window as any).qz === 'undefined') {
-        await new Promise<void>((resolve, reject) => {
-          if (document.querySelector('script[src*="qz-tray"]')) { resolve(); return }
-          const s = document.createElement('script')
-          s.src = 'https://cdn.jsdelivr.net/npm/qz-tray@2.2.4/qz-tray.js'
-          s.onload = () => resolve()
-          s.onerror = () => reject(new Error('no script'))
-          document.head.appendChild(s)
-        })
-      }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const qz = (window as any).qz
-      // Permitir conexión sin certificado (requiere QZ Tray en modo permisivo)
-      qz.security.setCertificatePromise(() => Promise.resolve(''))
-      qz.security.setSignatureAlgorithm('SHA512')
-      qz.security.setSignaturePromise(() => Promise.resolve(''))
-      if (!qz.websocket.isActive()) {
-        await qz.websocket.connect({ retries: 1, delay: 0.5 })
-      }
-      const config = qz.configs.create('GA-E2001')
-      // ESC p 0 – comando apertura cajón monedero estándar
-      await qz.print(config, [{ type: 'raw', format: 'command', data: '\x1B\x70\x00\x19\xFA' }])
-    } catch {
-      // QZ Tray no está instalado o no está activo — el cajón no se abre pero la venta continúa normalmente
-    }
-  }
-
-  return (
-    <>
-      {/* Estilos de impresión: oculta todo excepto el ticket */}
-      <style>{`
-        @media print {
-          body > * { display: none !important; }
-          .print-receipt {
-            display: block !important;
-            position: fixed !important;
-            top: 0; left: 0;
-            width: 80mm;
-            font-size: 12px;
-            font-family: monospace;
-            color: #000;
-            background: #fff;
-            z-index: 9999;
-          }
-          .no-print { display: none !important; }
-        }
-      `}</style>
-
-      <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm flex flex-col max-h-[90vh]">
-          {/* Encabezado modal */}
-          <div className="px-5 py-4 border-b border-stone-100 flex items-center justify-between no-print">
-            <div>
-              <h3 className="font-bold text-stone-800 text-lg">✅ Venta registrada</h3>
-              <p className="text-stone-500 text-sm">{receipt.saleNumber}</p>
-            </div>
-            <button
-              onClick={onClose}
-              className="w-8 h-8 rounded-xl bg-stone-100 hover:bg-stone-200 flex items-center justify-center text-stone-500 transition-colors"
-            >
-              ✕
-            </button>
-          </div>
-
-          {/* Ticket imprimible */}
-          <div className="print-receipt flex-1 overflow-y-auto p-4">
-            {/* Cabecera tienda */}
-            <div className="text-center border-b border-dashed border-stone-300 pb-3 mb-3">
-              <p className="font-bold text-lg tracking-wide">Alcaraván</p>
-              <p className="text-xs text-stone-500">Minimarket - Café</p>
-              <p className="text-xs text-stone-500">Minimarket - Café</p>
-              <p className="text-xs text-stone-400 mt-1">
-                {receipt.date.toLocaleDateString('es-CO', {
-                  day: '2-digit', month: 'long', year: 'numeric'
-                })}{' '}
-                {receipt.date.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}
-              </p>
-              <p className="text-xs font-mono font-bold mt-1">{receipt.saleNumber}</p>
-              {receipt.customerName && (
-                <p className="text-xs text-stone-500 mt-0.5">Cliente: {receipt.customerName}</p>
-              )}
-            </div>
-
-            {/* Ítems */}
-            <table className="w-full text-xs mb-3">
-              <thead>
-                <tr className="border-b border-stone-200">
-                  <th className="text-left py-1 font-semibold text-stone-600">Producto</th>
-                  <th className="text-center py-1 font-semibold text-stone-600 w-8">Cant</th>
-                  <th className="text-right py-1 font-semibold text-stone-600 w-20">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {receipt.items.map((item, i) => (
-                  <tr key={i} className="border-b border-stone-50">
-                    <td className="py-1.5 text-stone-800 leading-tight">{item.product_name}</td>
-                    <td className="py-1.5 text-center text-stone-600">{item.quantity}</td>
-                    <td className="py-1.5 text-right font-medium text-stone-800">
-                      {formatCurrency(item.total)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            {/* Totales */}
-            <div className="border-t border-dashed border-stone-300 pt-2 space-y-1 text-xs">
-              <div className="flex justify-between text-stone-600">
-                <span>Subtotal</span>
-                <span>{formatCurrency(receipt.subtotal)}</span>
-              </div>
-              {receipt.discount > 0 && (
-                <div className="flex justify-between text-emerald-600">
-                  <span>Descuento</span>
-                  <span>- {formatCurrency(receipt.discount)}</span>
-                </div>
-              )}
-              {receipt.tax > 0 && (
-                <div className="flex justify-between text-stone-500">
-                  <span>IVA</span>
-                  <span>{formatCurrency(receipt.tax)}</span>
-                </div>
-              )}
-              <div className="flex justify-between font-bold text-sm text-stone-800 border-t border-stone-300 pt-1 mt-1">
-                <span>TOTAL</span>
-                <span>{formatCurrency(receipt.total)}</span>
-              </div>
-            </div>
-
-            {/* Pagos */}
-            <div className="border-t border-dashed border-stone-300 pt-2 mt-2 space-y-1 text-xs">
-              {receipt.payments.map((p, i) => (
-                <div key={i} className="flex justify-between text-stone-600">
-                  <span>{PAYMENT_LABELS[p.method] ?? p.method}</span>
-                  <span>{formatCurrency(p.amount)}</span>
-                </div>
-              ))}
-              {cashPayment?.received && cashPayment.received > 0 && (
-                <div className="flex justify-between text-stone-500">
-                  <span>Recibido</span>
-                  <span>{formatCurrency(cashPayment.received)}</span>
-                </div>
-              )}
-              {change > 0 && (
-                <div className="flex justify-between font-bold text-emerald-700">
-                  <span>Cambio</span>
-                  <span>{formatCurrency(change)}</span>
-                </div>
-              )}
-            </div>
-
-            {/* Notas */}
-            {receipt.notes && (
-              <p className="text-xs text-stone-400 mt-2 text-center border-t border-dashed border-stone-200 pt-2">
-                {receipt.notes}
-              </p>
-            )}
-
-            {/* Pie */}
-            <div className="text-center mt-3 pt-2 border-t border-dashed border-stone-300">
-              <p className="text-xs text-stone-400">¡Gracias por su compra!</p>
-            </div>
-          </div>
-
-          {/* Botones */}
-          <div className="px-4 pb-4 pt-2 flex gap-3 no-print">
-            <button
-              onClick={onClose}
-              className="flex-1 py-2.5 rounded-xl border border-stone-200 text-stone-600 hover:bg-stone-50 font-medium transition-colors"
-            >
-              Cerrar
-            </button>
-            <button
-              onClick={handlePrint}
-              className="flex-1 py-2.5 rounded-xl bg-amber-700 text-white font-bold hover:bg-amber-800 transition-colors shadow-lg shadow-amber-700/25"
-            >
-              🖨️ Imprimir
-            </button>
-          </div>
-        </div>
-      </div>
-    </>
-  )
+const PAYMENT_LABELS: Record<string, string> = {
+  cash: 'Efectivo',
+  card_debit: 'Débito',
+  card_credit: 'Crédito',
+  transfer: 'Transferencia',
+  nequi: 'Nequi',
+  daviplata: 'Daviplata',
+  bancolombia: 'Bancolombia',
+  other: 'Otro',
 }
 
-// ─── Componente: Buscador de cliente ────────────────────────────────
-function CustomerSearch({
-  onSelect,
-  onClose,
-}: {
-  onSelect: (c: Customer) => void
-  onClose: () => void
-}) {
-  const [query, setQuery] = useState('')
-  const [results, setResults] = useState<Customer[]>([])
-  const [loading, setLoading] = useState(false)
-  const supabase = createClient()
+// ─── Modal: Abrir Caja ────────────────────────────────────────────────────────
 
-  useEffect(() => {
-    if (!query.trim() || query.length < 2) { setResults([]); return }
-    const t = setTimeout(async () => {
-      setLoading(true)
-      const { data } = await supabase
-        .from('customers')
-        .select('id, first_name, last_name, full_name, phone, document_number, loyalty_points')
-        .eq('is_active', true)
-        .or(`full_name.ilike.%${query}%,first_name.ilike.%${query}%,phone.ilike.%${query}%,document_number.ilike.%${query}%`)
-        .order('first_name')
-        .limit(10)
-      setResults((data ?? []).map((c: any) => ({
-        ...c,
-        name: c.full_name || [c.first_name, c.last_name].filter(Boolean).join(' '),
-      })))
-      setLoading(false)
-    }, 250)
-    return () => clearTimeout(t)
-  }, [query])
-
-  return (
-    <div className="fixed inset-0 bg-black/60 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="bg-white w-full sm:rounded-2xl sm:max-w-sm shadow-2xl">
-        <div className="px-4 py-3 border-b flex items-center gap-3">
-          <input autoFocus type="text" value={query} onChange={e => setQuery(e.target.value)}
-            placeholder="Nombre, teléfono o documento..."
-            className="flex-1 outline-none text-stone-800 placeholder:text-stone-400 text-sm" />
-          {loading && <span className="w-4 h-4 border-2 border-amber-700/30 border-t-amber-700 rounded-full animate-spin" />}
-          <button onClick={onClose} className="text-stone-400 hover:text-stone-600 text-lg">✕</button>
-        </div>
-        <div className="max-h-64 overflow-y-auto">
-          {results.length === 0 && query.length >= 2 && !loading && (
-            <p className="text-center text-stone-400 text-sm py-8">No se encontraron clientes</p>
-          )}
-          {results.map(c => (
-            <button key={c.id} onClick={() => { onSelect(c); onClose() }}
-              className="w-full flex items-center justify-between px-4 py-3 hover:bg-amber-50 transition-colors text-left border-b border-stone-50 last:border-0">
-              <div>
-                <p className="font-medium text-stone-800 text-sm">{(c as any).name}</p>
-                {c.phone && <p className="text-xs text-stone-400">📞 {c.phone}</p>}
-              </div>
-              {(c.loyalty_points ?? 0) > 0 && (
-                <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">⭐ {c.loyalty_points}</span>
-              )}
-            </button>
-          ))}
-        </div>
-        <div className="p-3 border-t">
-          <p className="text-xs text-stone-400 text-center">Escribe para buscar clientes</p>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ─── Componente: Buscador de productos ──────────────────────────────
-function ProductSearch({
-  onSelect,
-  inputRef,
-}: {
-  onSelect: (product: Product) => void
-  inputRef?: React.RefObject<HTMLInputElement | null>
-}) {
-  const [query, setQuery] = useState('')
-  const [results, setResults] = useState<Product[]>([])
-  const [loading, setLoading] = useState(false)
-  const supabase = createClient()
-
-  useEffect(() => {
-    if (!query.trim() || query.length < 2) {
-      setResults([])
-      return
-    }
-
-    // Detectar si es un código de barras (solo números, > 6 dígitos): buscar inmediatamente
-    const isBarcode = /^\d{6,}$/.test(query.trim())
-    const delay = isBarcode ? 0 : 250
-
-    const timer = setTimeout(async () => {
-      setLoading(true)
-      const { data } = await supabase
-        .from('products')
-        .select('*, category:categories(name), unit:units_of_measure(abbreviation)')
-        .eq('is_active', true)
-        .or(`name.ilike.%${query}%,barcode.eq.${query},code.ilike.%${query}%`)
-        .order('name')
-        .limit(12)
-
-      const results = data ?? []
-      setResults(results)
-      setLoading(false)
-
-      // Si es código de barras y hay exactamente un resultado: agregar automáticamente
-      if (isBarcode && results.length === 1) {
-        onSelect(results[0])
-        setQuery('')
-        setResults([])
-      }
-    }, delay)
-
-    return () => clearTimeout(timer)
-  }, [query])
-
-  return (
-    <div className="relative">
-      <div className="flex items-center gap-2 bg-white rounded-2xl border-2 border-amber-700 px-4 py-3 shadow-sm">
-        <span className="text-stone-400 text-lg">🔍</span>
-        <input
-          ref={inputRef as React.RefObject<HTMLInputElement>}
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && results.length > 0) {
-              onSelect(results[0])
-              setQuery('')
-              setResults([])
-            }
-          }}
-          placeholder="Buscar producto o escanear código de barras..."
-          className="flex-1 outline-none text-stone-800 placeholder:text-stone-400 text-sm"
-          autoFocus
-        />
-        {loading && <span className="w-4 h-4 border-2 border-amber-700/30 border-t-amber-700 rounded-full animate-spin" />}
-        {query && (
-          <button onClick={() => setQuery('')} className="text-stone-400 hover:text-stone-600">✕</button>
-        )}
-      </div>
-
-      {results.length > 0 && (
-        <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-2xl border border-stone-200 shadow-xl z-20 max-h-64 overflow-y-auto">
-          {results.map((product) => (
-            <button
-              key={product.id}
-              onClick={() => {
-                onSelect(product)
-                setQuery('')
-                setResults([])
-              }}
-              className="w-full flex items-center justify-between px-4 py-3 hover:bg-amber-50 transition-colors text-left border-b border-stone-50 last:border-0"
-            >
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-stone-800 text-sm truncate">{product.name}</p>
-                <p className="text-xs text-stone-400">
-                  {product.code ?? product.barcode ?? 'Sin código'} ·{' '}
-                  {(product as any).category?.name ?? 'Sin categoría'}
-                </p>
-              </div>
-              <div className="text-right ml-3 flex-shrink-0">
-                <p className="font-bold text-amber-700">{formatCurrency(product.sale_price)}</p>
-                <p className={`text-[10px] ${product.stock > 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-                  Stock: {product.stock}
-                </p>
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─── Componente: ítem del carrito ────────────────────────────────────
-function CartItemRow({
-  item,
-  onQuantityChange,
-  onRemove,
-  onDiscountChange,
-}: {
-  item: CartItem
-  onQuantityChange: (qty: number) => void
-  onRemove: () => void
-  onDiscountChange: (d: number) => void
-}) {
-  return (
-    <div className="flex items-center gap-3 py-3 border-b border-stone-100 last:border-0">
-      <div className="flex-1 min-w-0">
-        <p className="font-medium text-stone-800 text-sm truncate">{item.product.name}</p>
-        <p className="text-xs text-stone-500">{formatCurrency(item.unit_price)} c/u</p>
-      </div>
-
-      {/* Controles de cantidad */}
-      <div className="flex items-center gap-1 bg-stone-100 rounded-xl p-1">
-        <button
-          onClick={() => onQuantityChange(item.quantity - 1)}
-          className="w-7 h-7 rounded-lg bg-white shadow-sm flex items-center justify-center text-stone-600 font-bold hover:bg-stone-50 active:scale-95 transition-all"
-        >
-          −
-        </button>
-        <span className="w-8 text-center font-bold text-stone-800 text-sm tabular-nums">
-          {item.quantity}
-        </span>
-        <button
-          onClick={() => onQuantityChange(item.quantity + 1)}
-          className="w-7 h-7 rounded-lg bg-white shadow-sm flex items-center justify-center text-stone-600 font-bold hover:bg-stone-50 active:scale-95 transition-all"
-        >
-          +
-        </button>
-      </div>
-
-      <div className="text-right min-w-[72px]">
-        <p className="font-bold text-stone-800 text-sm">{formatCurrency(item.total)}</p>
-      </div>
-
-      <button
-        onClick={onRemove}
-        className="w-7 h-7 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors flex-shrink-0"
-      >
-        ✕
-      </button>
-    </div>
-  )
-}
-
-// ─── Modal de pago ───────────────────────────────────────────────────
-function PaymentModal({
-  total,
-  hasCustomer,
-  onClose,
+function AbrirCajaModal({
   onConfirm,
-  onConfirmFiado,
+  onClose,
 }: {
-  total: number
-  hasCustomer: boolean
+  onConfirm: (amount: number) => Promise<void>
   onClose: () => void
-  onConfirm: (payments: CartPayment[]) => void
-  onConfirmFiado: () => void
 }) {
-  const [payments, setPayments] = useState<CartPayment[]>([{ method: 'cash', amount: total }])
-  const [processing, setProcessing] = useState(false)
+  const [amount, setAmount] = useState('')
+  const [loading, setLoading] = useState(false)
+  const today = getColombiaDate()
 
-  const METHODS: { key: PaymentMethod; label: string; icon: string }[] = [
-    { key: 'cash', label: 'Efectivo', icon: '💵' },
-    { key: 'card_debit', label: 'Débito', icon: '💳' },
-    { key: 'card_credit', label: 'Crédito', icon: '💳' },
-    { key: 'transfer', label: 'Transferencia', icon: '🏦' },
-    { key: 'nequi', label: 'Nequi', icon: '📱' },
-    { key: 'daviplata', label: 'Daviplata', icon: '📱' },
-    { key: 'bancolombia', label: 'Bancolombia', icon: '🏦' },
-    { key: 'other', label: 'Otro', icon: '💰' },
-  ]
-
-  const paidTotal = payments.reduce((s, p) => s + (p.amount || 0), 0)
-  const remaining = total - paidTotal
-  const change = payments.find((p) => p.method === 'cash')?.received
-    ? (payments.find((p) => p.method === 'cash')!.received! - payments.find((p) => p.method === 'cash')!.amount)
-    : 0
+  async function handleSubmit() {
+    setLoading(true)
+    await onConfirm(parseFloat(amount) || 0)
+    setLoading(false)
+  }
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
         <div className="px-6 py-5 border-b border-stone-100">
-          <h3 className="text-xl font-bold text-stone-800">Registrar Pago</h3>
-          <p className="text-3xl font-bold text-amber-700 mt-1">{formatCurrency(total)}</p>
+          <h2 className="text-xl font-bold text-stone-800">🔓 Abrir Caja</h2>
+          <p className="text-stone-500 text-sm mt-1">
+            {new Date(today).toLocaleDateString('es-CO', {
+              weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+              timeZone: 'UTC',
+            })}
+          </p>
         </div>
 
         <div className="p-6 space-y-4">
-          {/* Método de pago rápido */}
           <div>
-            <p className="text-sm font-medium text-stone-600 mb-2">Método de pago</p>
-            <div className="grid grid-cols-4 gap-2">
-              {METHODS.map((m) => (
-                <button
-                  key={m.key}
-                  onClick={() => setPayments([{ method: m.key, amount: total }])}
-                  className={`flex flex-col items-center gap-1 p-2 rounded-xl border-2 transition-all text-center ${
-                    payments[0]?.method === m.key && payments.length === 1
-                      ? 'border-amber-700 bg-amber-50'
-                      : 'border-stone-200 hover:border-stone-300'
-                  }`}
-                >
-                  <span className="text-lg">{m.icon}</span>
-                  <span className="text-[10px] font-medium text-stone-600 leading-tight">{m.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Monto por método */}
-          {payments.map((p, i) => (
-            <div key={i} className="space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-stone-600 w-24">
-                  {METHODS.find((m) => m.key === p.method)?.label}
-                </span>
-                <input
-                  type="number"
-                  value={p.amount || ''}
-                  onChange={(e) => {
-                    const newP = [...payments]
-                    newP[i].amount = parseFloat(e.target.value) || 0
-                    setPayments(newP)
-                  }}
-                  className="flex-1 px-3 py-2 rounded-xl border border-stone-200 text-right font-bold text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-700"
-                  placeholder="0"
-                />
-              </div>
-              {p.method === 'cash' && (
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-stone-500 w-24">Recibido</span>
-                  <input
-                    type="number"
-                    value={p.received || ''}
-                    onChange={(e) => {
-                      const newP = [...payments]
-                      newP[i].received = parseFloat(e.target.value) || 0
-                      setPayments(newP)
-                    }}
-                    className="flex-1 px-3 py-2 rounded-xl border border-stone-200 text-right text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-700"
-                    placeholder={formatCurrency(total)}
-                  />
-                </div>
-              )}
-            </div>
-          ))}
-
-          {/* Pago mixto */}
-          <button
-            onClick={() => setPayments([...payments, { method: 'transfer', amount: remaining > 0 ? remaining : 0 }])}
-            className="text-sm text-amber-700 hover:underline font-medium"
-          >
-            + Agregar otro método de pago
-          </button>
-
-          {/* Resumen */}
-          <div className="bg-stone-50 rounded-xl p-4 space-y-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-stone-600">Total a cobrar</span>
-              <span className="font-bold text-stone-800">{formatCurrency(total)}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-stone-600">Total pagado</span>
-              <span className="font-bold text-stone-800">{formatCurrency(paidTotal)}</span>
-            </div>
-            {remaining > 0 && (
-              <div className="flex justify-between text-sm text-red-600 font-medium">
-                <span>Faltante</span>
-                <span>{formatCurrency(remaining)}</span>
-              </div>
-            )}
-            {change > 0 && (
-              <div className="flex justify-between text-sm text-emerald-600 font-bold border-t border-stone-200 pt-2">
-                <span>Cambio a devolver</span>
-                <span>{formatCurrency(change)}</span>
-              </div>
-            )}
+            <label className="block text-sm font-medium text-stone-700 mb-1">
+              Efectivo inicial en caja
+            </label>
+            <input
+              type="number"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
+              placeholder="0"
+              autoFocus
+              className="w-full px-4 py-3 rounded-xl border border-stone-200 text-right text-xl font-bold text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-700"
+            />
+            <p className="text-xs text-stone-400 mt-1">
+              Ingresa el dinero que hay físicamente en la caja al inicio del día.
+            </p>
           </div>
         </div>
 
-        <div className="px-6 pb-6 space-y-2">
-          {/* Botón Fiado */}
-          {hasCustomer && (
-            <button
-              onClick={async () => { setProcessing(true); await onConfirmFiado(); setProcessing(false) }}
-              disabled={processing}
-              className="w-full py-2.5 rounded-xl border-2 border-orange-400 text-orange-600 font-semibold hover:bg-orange-50 transition-colors text-sm"
-            >
-              📋 Registrar como Fiado (pago pendiente)
-            </button>
-          )}
-          <div className="flex gap-3">
-            <button
-              onClick={onClose}
-              className="flex-1 py-3 rounded-xl border border-stone-200 text-stone-600 font-medium hover:bg-stone-50 transition-colors"
-            >
-              Cancelar
-            </button>
-            <button
-              onClick={async () => {
-                setProcessing(true)
-                await onConfirm(payments)
-                setProcessing(false)
-              }}
-              disabled={remaining > 0 || processing}
-              className="flex-1 py-3 rounded-xl bg-amber-700 text-white font-bold hover:bg-amber-800 disabled:bg-stone-300 disabled:cursor-not-allowed transition-colors shadow-lg shadow-amber-700/30"
-            >
-              {processing ? (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Procesando...
-                </span>
-              ) : (
-                '✓ Confirmar Venta'
-              )}
-            </button>
-          </div>
+        <div className="px-6 pb-6 flex gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 py-3 rounded-xl border border-stone-200 text-stone-600 font-medium hover:bg-stone-50 transition-colors"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={loading}
+            className="flex-1 py-3 rounded-xl bg-emerald-600 text-white font-bold hover:bg-emerald-700 disabled:bg-stone-300 transition-colors shadow-lg shadow-emerald-600/25"
+          >
+            {loading ? '...' : '✓ Abrir Caja'}
+          </button>
         </div>
       </div>
     </div>
   )
 }
 
-// ─── POS PRINCIPAL ───────────────────────────────────────────────────
-export default function POSPage() {
-  const supabase = createClient()
-  const searchRef = useRef<HTMLInputElement>(null)
+// ─── Modal: Cierre y Arqueo ───────────────────────────────────────────────────
 
-  const {
-    items,
-    customer,
-    notes,
-    suspended_carts,
-    addItem,
-    removeItem,
-    updateQuantity,
-    setCustomer,
-    setNotes,
-    clearCart,
-    suspendCart,
-    recoverCart,
-    getSubtotal,
-    getDiscountAmount,
-    getTaxAmount,
-    getTotal,
-    getItemCount,
-  } = useCartStore()
+function CerrarCajaModal({
+  session,
+  summary,
+  onConfirm,
+  onClose,
+}: {
+  session: CashSession
+  summary: DailySummary
+  onConfirm: (closingAmount: number, notes: string) => Promise<void>
+  onClose: () => void
+}) {
+  const expectedCash = session.opening_amount + summary.cash_sales
+  const [closingAmount, setClosingAmount] = useState(String(expectedCash))
+  const [notes, setNotes] = useState('')
+  const [loading, setLoading] = useState(false)
 
-  const [showPayment, setShowPayment] = useState(false)
-  const [showCustomerSearch, setShowCustomerSearch] = useState(false)
-  const [saleReceipt, setSaleReceipt] = useState<ReceiptData | null>(null)
-  const [saleError, setSaleError] = useState('')
+  const actual = parseFloat(closingAmount) || 0
+  const difference = actual - expectedCash
 
-  // Foco automático en el buscador
-  useEffect(() => {
-    searchRef.current?.focus()
-  }, [showPayment])
-
-  // Atajos de teclado
-  useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === 'F2') { e.preventDefault(); searchRef.current?.focus() }
-      if (e.key === 'F10') { e.preventDefault(); if (items.length > 0) setShowPayment(true) }
-      if (e.key === 'Escape') { setShowPayment(false) }
-    }
-    window.addEventListener('keydown', handleKey)
-    return () => window.removeEventListener('keydown', handleKey)
-  }, [items])
-
-  async function handleConfirmFiado() {
-    if (!customer) return
-    await handleConfirmSale([], true)
+  async function handleSubmit() {
+    setLoading(true)
+    await onConfirm(actual, notes)
+    setLoading(false)
   }
 
-  async function handleConfirmSale(payments: CartPayment[], isFiado = false) {
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md my-4">
+        <div className="px-6 py-5 border-b border-stone-100">
+          <h2 className="text-xl font-bold text-stone-800">🔒 Cierre de Caja</h2>
+          <p className="text-stone-500 text-sm mt-1">Arqueo y resumen del día</p>
+        </div>
+
+        <div className="p-6 space-y-5">
+          {/* Resumen del día */}
+          <div className="bg-stone-50 rounded-xl p-4 space-y-2">
+            <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide mb-3">
+              Resumen de ventas del día
+            </p>
+            <div className="flex justify-between text-sm">
+              <span className="text-stone-600">Total ventas ({summary.sale_count})</span>
+              <span className="font-bold text-stone-800">{formatCurrency(summary.total_sales)}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-stone-600">💵 Efectivo recibido</span>
+              <span className="font-medium text-emerald-700">{formatCurrency(summary.cash_sales)}</span>
+            </div>
+            {summary.nequi_sales > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-stone-600">📱 Nequi / Daviplata</span>
+                <span className="font-medium text-stone-700">{formatCurrency(summary.nequi_sales)}</span>
+              </div>
+            )}
+            {summary.transfer_sales > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-stone-600">🏦 Transferencias</span>
+                <span className="font-medium text-stone-700">{formatCurrency(summary.transfer_sales)}</span>
+              </div>
+            )}
+            {summary.card_sales > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-stone-600">💳 Tarjeta</span>
+                <span className="font-medium text-stone-700">{formatCurrency(summary.card_sales)}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Arqueo */}
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-2">
+            <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide mb-3">
+              Arqueo de efectivo
+            </p>
+            <div className="flex justify-between text-sm">
+              <span className="text-stone-600">Efectivo inicial</span>
+              <span className="font-medium">{formatCurrency(session.opening_amount)}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-stone-600">+ Ventas en efectivo</span>
+              <span className="font-medium">{formatCurrency(summary.cash_sales)}</span>
+            </div>
+            <div className="flex justify-between text-sm font-bold border-t border-amber-200 pt-2 mt-2">
+              <span className="text-stone-700">= Efectivo esperado</span>
+              <span className="text-amber-700">{formatCurrency(expectedCash)}</span>
+            </div>
+          </div>
+
+          {/* Efectivo contado */}
+          <div>
+            <label className="block text-sm font-medium text-stone-700 mb-1">
+              Efectivo contado físicamente
+            </label>
+            <input
+              type="number"
+              value={closingAmount}
+              onChange={(e) => setClosingAmount(e.target.value)}
+              autoFocus
+              className="w-full px-4 py-3 rounded-xl border border-stone-200 text-right text-xl font-bold text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-700"
+            />
+          </div>
+
+          {/* Diferencia */}
+          {closingAmount && (
+            <div className={`rounded-xl p-3 text-center ${
+              Math.abs(difference) < 1
+                ? 'bg-emerald-50 border border-emerald-200'
+                : difference > 0
+                ? 'bg-blue-50 border border-blue-200'
+                : 'bg-red-50 border border-red-200'
+            }`}>
+              <p className="text-xs text-stone-500 mb-1">Diferencia (sobrante/faltante)</p>
+              <p className={`text-2xl font-bold ${
+                Math.abs(difference) < 1
+                  ? 'text-emerald-600'
+                  : difference > 0
+                  ? 'text-blue-600'
+                  : 'text-red-600'
+              }`}>
+                {difference > 0 ? '+' : ''}{formatCurrency(difference)}
+              </p>
+              <p className="text-xs text-stone-400 mt-1">
+                {Math.abs(difference) < 1
+                  ? '✓ Cuadra perfectamente'
+                  : difference > 0
+                  ? 'Hay más dinero del esperado'
+                  : 'Hay menos dinero del esperado'}
+              </p>
+            </div>
+          )}
+
+          {/* Notas */}
+          <div>
+            <label className="block text-sm font-medium text-stone-700 mb-1">
+              Observaciones (opcional)
+            </label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              placeholder="Ej: Falta de cambio, gastos menores..."
+              className="w-full px-3 py-2 rounded-xl border border-stone-200 text-sm text-stone-700 focus:outline-none focus:ring-2 focus:ring-amber-700 resize-none"
+            />
+          </div>
+        </div>
+
+        <div className="px-6 pb-6 flex gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 py-3 rounded-xl border border-stone-200 text-stone-600 font-medium hover:bg-stone-50 transition-colors"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={loading || !closingAmount}
+            className="flex-1 py-3 rounded-xl bg-red-600 text-white font-bold hover:bg-red-700 disabled:bg-stone-300 transition-colors"
+          >
+            {loading ? '...' : '🔒 Cerrar Caja'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Página principal ─────────────────────────────────────────────────────────
+
+export default function CajaPage() {
+  const supabase = createClient()
+
+  const [session, setSession] = useState<CashSession | null>(null)
+  const [summary, setSummary] = useState<DailySummary>({
+    total_sales: 0, cash_sales: 0, nequi_sales: 0,
+    transfer_sales: 0, card_sales: 0, other_sales: 0,
+    sale_count: 0, sales: [],
+  })
+  const [loading, setLoading] = useState(true)
+  const [showAbrir, setShowAbrir] = useState(false)
+  const [showCerrar, setShowCerrar] = useState(false)
+  const [error, setError] = useState('')
+
+  const colombiaToday = getColombiaDate()
+  const { from: todayFrom, to: todayTo } = getColombiaDateUTCRange(colombiaToday)
+
+  // ── Cargar sesión del día y ventas ─────────────────────────────────────────
+  const loadData = useCallback(async () => {
+    setLoading(true)
+    setError('')
+
     try {
-      setSaleError('')
+      // Buscar sesión de hoy
+      const { data: sessionData, error: sessionError } = await supabase
+        .from('cash_sessions')
+        .select('*')
+        .eq('date', colombiaToday)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
 
-      // Capturar los datos del carrito ANTES de limpiar
-      const cartItems = [...items]
-      const cartSubtotal = getSubtotal()
-      const cartDiscount = getDiscountAmount()
-      const cartTax = getTaxAmount()
-      const cartTotal = getTotal()
-      const cartCustomer = customer
-      const cartNotes = notes
+      if (sessionError && sessionError.code !== 'PGRST116') {
+        // Tabla no existe aún
+        if (sessionError.code === '42P01') {
+          setError('tabla_no_existe')
+          setLoading(false)
+          return
+        }
+        throw sessionError
+      }
 
-      // Crear número de venta
-      const saleNumber = 'V' + Date.now().toString().slice(-8)
+      setSession(sessionData ?? null)
 
-      const { data: sale, error: saleError } = await supabase
+      // Cargar ventas de hoy (con zona horaria Colombia)
+      const { data: salesData } = await supabase
         .from('sales')
-        .insert({
-          sale_number: saleNumber,
-          customer_id: cartCustomer?.id ?? null,
-          subtotal: cartSubtotal,
-          discount_amount: cartDiscount,
-          tax_amount: cartTax,
-          total: cartTotal,
-          status: isFiado ? 'pending' : 'completed',
-          notes: cartNotes || null,
-        })
-        .select()
-        .single()
+        .select(`
+          id, sale_number, total, created_at,
+          sale_payments(payment_method, amount)
+        `)
+        .gte('created_at', todayFrom)
+        .lt('created_at', todayTo)
+        .eq('status', 'completed')
+        .order('created_at', { ascending: false })
 
-      if (saleError || !sale) throw saleError ?? new Error('Error al crear venta')
+      const sales = salesData ?? []
 
-      // Insertar ítems
-      const saleItems = cartItems.map((i) => ({
-        sale_id: sale.id,
-        product_id: i.product.id,
-        product_name: i.product.name,
-        product_code: i.product.code,
-        quantity: i.quantity,
-        unit_price: i.unit_price,
-        purchase_price: i.product.purchase_price,
-        discount_percentage: i.discount_percentage,
-        discount_amount: i.discount_amount,
-        tax_rate: i.product.iva_rate,
-        tax_amount: (i.total * i.product.iva_rate) / 100,
-        subtotal: i.subtotal,
-        total: i.total,
-        notes: i.notes ?? null,
-      }))
+      // Calcular totales por método de pago
+      let cash = 0, nequi = 0, transfer = 0, card = 0, other = 0, total = 0
 
-      await supabase.from('sale_items').insert(saleItems)
+      for (const sale of sales) {
+        total += sale.total
+        for (const p of (sale.sale_payments ?? [])) {
+          if (p.payment_method === 'cash') cash += p.amount
+          else if (['nequi', 'daviplata'].includes(p.payment_method)) nequi += p.amount
+          else if (['transfer', 'bancolombia'].includes(p.payment_method)) transfer += p.amount
+          else if (['card_debit', 'card_credit'].includes(p.payment_method)) card += p.amount
+          else other += p.amount
+        }
+      }
 
-      // Insertar pagos
-      const salePayments = payments.map((p) => ({
-        sale_id: sale.id,
-        payment_method: p.method,
-        amount: p.amount,
-        reference: p.reference ?? null,
-        received_amount: p.received ?? null,
-        change_amount: p.change ?? 0,
-      }))
-
-      await supabase.from('sale_payments').insert(salePayments)
-
-      // Limpiar carrito
-      clearCart()
-      setShowPayment(false)
-
-      // Preparar y mostrar recibo
-      setSaleReceipt({
-        saleNumber,
-        date: new Date(),
-        items: cartItems.map((i) => ({
-          product_name: i.product.name,
-          quantity: i.quantity,
-          unit_price: i.unit_price,
-          total: i.total,
-        })),
-        subtotal: cartSubtotal,
-        discount: cartDiscount,
-        tax: cartTax,
-        total: cartTotal,
-        payments,
-        customerName: cartCustomer
-          ? (cartCustomer.full_name || [cartCustomer.first_name, cartCustomer.last_name].filter(Boolean).join(' '))
-          : undefined,
-        notes: cartNotes,
+      setSummary({
+        total_sales: total,
+        cash_sales: cash,
+        nequi_sales: nequi,
+        transfer_sales: transfer,
+        card_sales: card,
+        other_sales: other,
+        sale_count: sales.length,
+        sales: sales as DailySummary['sales'],
       })
     } catch (err) {
       console.error(err)
-      setSaleError('Error al registrar la venta. Intenta de nuevo.')
+      setError('No se pudo cargar la información de caja.')
     }
-  }
 
-  const subtotal = getSubtotal()
-  const discount = getDiscountAmount()
-  const tax = getTaxAmount()
-  const total = getTotal()
-  const itemCount = getItemCount()
-
-  return (
-    <div className="flex h-[calc(100vh-56px)] overflow-hidden bg-stone-100">
-      {/* ─── Panel izquierdo: productos ─────────────────────── */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Buscador */}
-        <div className="p-3 bg-white border-b border-stone-200">
-          <ProductSearch onSelect={addItem} inputRef={searchRef} />
-          <p className="text-[10px] text-stone-400 mt-1.5 pl-1">
-            F2: enfocar búsqueda · F10: cobrar · Esc: cancelar pago
-          </p>
-        </div>
-
-        {/* Grilla de productos destacados */}
-        <div className="flex-1 overflow-y-auto p-3">
-          <FeaturedProducts onSelect={addItem} />
-        </div>
-
-        {/* Ventas suspendidas */}
-        {suspended_carts.length > 0 && (
-          <div className="px-3 pb-3">
-            <div className="bg-amber-50 rounded-xl p-3 border border-amber-200">
-              <p className="text-xs font-medium text-amber-700 mb-2">
-                🕐 {suspended_carts.length} venta(s) suspendida(s)
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {suspended_carts.map((sc) => (
-                  <button
-                    key={sc.id}
-                    onClick={() => recoverCart(sc.id)}
-                    className="text-xs px-3 py-1.5 bg-amber-700 text-white rounded-lg hover:bg-amber-800 transition-colors"
-                  >
-                    Recuperar — {sc.items.length} ítem(s)
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* ─── Panel derecho: carrito ──────────────────────────── */}
-      <div className="w-80 xl:w-96 flex flex-col bg-white border-l border-stone-200 shadow-xl">
-        {/* Encabezado carrito */}
-        <div className="px-4 py-3 border-b border-stone-100 bg-stone-50 space-y-2">
-          <div className="flex items-center justify-between">
-            <h3 className="font-bold text-stone-800">Carrito</h3>
-            {items.length > 0 && (
-              <button
-                onClick={suspendCart}
-                className="text-xs px-3 py-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-600 transition-colors"
-              >
-                ⏸ Suspender
-              </button>
-            )}
-          </div>
-          {/* Selector de cliente */}
-          {customer ? (
-            <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-              <span className="text-sm">👤</span>
-              <p className="flex-1 text-xs font-medium text-amber-800 truncate">
-                {customer.full_name || [customer.first_name, customer.last_name].filter(Boolean).join(' ')}
-              </p>
-              <button onClick={() => setCustomer(null)} className="text-amber-400 hover:text-amber-700 text-sm">✕</button>
-            </div>
-          ) : (
-            <button
-              onClick={() => setShowCustomerSearch(true)}
-              className="w-full text-xs px-3 py-2 rounded-xl border border-dashed border-stone-300 text-stone-500 hover:border-amber-400 hover:text-amber-700 hover:bg-amber-50 transition-all"
-            >
-              👤 Agregar cliente (opcional)
-            </button>
-          )}
-        </div>
-
-        {/* Ítems */}
-        <div className="flex-1 overflow-y-auto px-4">
-          {items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center py-10">
-              <span className="text-5xl mb-3">🛒</span>
-              <p className="text-stone-400 font-medium">Carrito vacío</p>
-              <p className="text-stone-300 text-sm mt-1">Busca o escanea un producto</p>
-            </div>
-          ) : (
-            <div>
-              {items.map((item) => (
-                <CartItemRow
-                  key={item.product.id}
-                  item={item}
-                  onQuantityChange={(q) => updateQuantity(item.product.id, q)}
-                  onRemove={() => removeItem(item.product.id)}
-                  onDiscountChange={(d) => useCartStore.getState().updateItemDiscount(item.product.id, d)}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Totales */}
-        <div className="border-t border-stone-200 px-4 py-3 space-y-1.5">
-          <div className="flex justify-between text-sm text-stone-600">
-            <span>Subtotal ({itemCount} ítem{itemCount !== 1 ? 's' : ''})</span>
-            <span className="font-medium">{formatCurrency(subtotal)}</span>
-          </div>
-          {discount > 0 && (
-            <div className="flex justify-between text-sm text-emerald-600">
-              <span>Descuento</span>
-              <span>- {formatCurrency(discount)}</span>
-            </div>
-          )}
-          {tax > 0 && (
-            <div className="flex justify-between text-sm text-stone-500">
-              <span>IVA</span>
-              <span>{formatCurrency(tax)}</span>
-            </div>
-          )}
-          <div className="flex justify-between text-lg font-bold text-stone-800 border-t border-stone-200 pt-2 mt-2">
-            <span>TOTAL</span>
-            <span className="text-amber-700">{formatCurrency(total)}</span>
-          </div>
-        </div>
-
-        {/* Error */}
-        {saleError && (
-          <div className="mx-4 mb-2 bg-red-50 border border-red-200 text-red-700 text-xs px-3 py-2 rounded-xl">
-            {saleError}
-          </div>
-        )}
-
-        {/* Botón cobrar */}
-        <div className="px-4 pb-4 pt-2">
-          <button
-            onClick={() => setShowPayment(true)}
-            disabled={items.length === 0}
-            className="w-full py-4 bg-amber-700 hover:bg-amber-800 disabled:bg-stone-300 disabled:cursor-not-allowed text-white font-bold text-lg rounded-2xl transition-all shadow-lg shadow-amber-700/30 active:scale-[0.98]"
-          >
-            💳 COBRAR {items.length > 0 ? formatCurrency(total) : ''}
-            <span className="block text-xs font-normal opacity-70">F10</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Modal de pago */}
-      {showPayment && (
-        <PaymentModal
-          total={total}
-          hasCustomer={!!customer}
-          onClose={() => setShowPayment(false)}
-          onConfirm={handleConfirmSale}
-          onConfirmFiado={handleConfirmFiado}
-        />
-      )}
-
-      {/* Buscador de cliente */}
-      {showCustomerSearch && (
-        <CustomerSearch
-          onSelect={setCustomer}
-          onClose={() => setShowCustomerSearch(false)}
-        />
-      )}
-
-      {/* Modal de recibo / ticket */}
-      {saleReceipt && (
-        <ReceiptModal
-          receipt={saleReceipt}
-          onClose={() => {
-            setSaleReceipt(null)
-            searchRef.current?.focus()
-          }}
-        />
-      )}
-    </div>
-  )
-}
-
-// ─── Grilla de productos destacados ─────────────────────────────────
-function FeaturedProducts({ onSelect }: { onSelect: (p: Product) => void }) {
-  const [products, setProducts] = useState<Product[]>([])
-  const [categories, setCategories] = useState<{ id: string; name: string; icon: string }[]>([])
-  const [activeCategory, setActiveCategory] = useState<string | null>(null)
-  const supabase = createClient()
+    setLoading(false)
+  }, [colombiaToday, todayFrom, todayTo])
 
   useEffect(() => {
-    async function load() {
-      const { data: cats } = await supabase
-        .from('categories')
-        .select('id, name, icon')
-        .eq('is_active', true)
-        .order('sort_order')
-        .limit(10)
-      setCategories(cats ?? [])
+    loadData()
+  }, [loadData])
 
-      const { data: prods } = await supabase
-        .from('products')
-        .select('*')
-        .eq('is_active', true)
-        .order('name')
-        .limit(40)
-      setProducts(prods ?? [])
+  // ── Abrir caja ─────────────────────────────────────────────────────────────
+  async function handleAbrirCaja(openingAmount: number) {
+    const { data, error } = await supabase
+      .from('cash_sessions')
+      .insert({
+        date: colombiaToday,
+        opening_amount: openingAmount,
+        status: 'open',
+      })
+      .select()
+      .single()
+
+    if (error) {
+      alert('Error al abrir la caja: ' + error.message)
+      return
     }
-    load()
-  }, [])
 
-  const filtered = activeCategory
-    ? products.filter((p) => p.category_id === activeCategory)
-    : products.filter((p) => p.is_featured)
+    setSession(data)
+    setShowAbrir(false)
+  }
+
+  // ── Cerrar caja ────────────────────────────────────────────────────────────
+  async function handleCerrarCaja(closingAmount: number, notes: string) {
+    if (!session) return
+    const expectedCash = session.opening_amount + summary.cash_sales
+    const difference = closingAmount - expectedCash
+
+    const { error } = await supabase
+      .from('cash_sessions')
+      .update({
+        closed_at: new Date().toISOString(),
+        closing_amount: closingAmount,
+        expected_cash: expectedCash,
+        difference,
+        notes: notes || null,
+        status: 'closed',
+      })
+      .eq('id', session.id)
+
+    if (error) {
+      alert('Error al cerrar la caja: ' + error.message)
+      return
+    }
+
+    setShowCerrar(false)
+    await loadData()
+  }
+
+  // ── Renderizado ────────────────────────────────────────────────────────────
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="w-8 h-8 border-4 border-amber-700/30 border-t-amber-700 rounded-full animate-spin" />
+      </div>
+    )
+  }
+
+  // Si la tabla no existe
+  if (error === 'tabla_no_existe') {
+    return (
+      <div className="max-w-2xl mx-auto p-6">
+        <div className="bg-amber-50 border border-amber-300 rounded-2xl p-6">
+          <h2 className="text-lg font-bold text-amber-800 mb-2">⚙️ Configuración requerida</h2>
+          <p className="text-amber-700 text-sm mb-4">
+            Para usar la caja necesitas crear la tabla <code className="bg-amber-100 px-1 rounded">cash_sessions</code> en Supabase.
+          </p>
+          <p className="text-amber-700 text-sm font-medium mb-2">Ejecuta este SQL en Supabase → SQL Editor:</p>
+          <pre className="bg-white border border-amber-200 rounded-xl p-4 text-xs text-stone-700 overflow-x-auto">
+{`CREATE TABLE IF NOT EXISTS cash_sessions (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  date           DATE NOT NULL,
+  opened_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  closed_at      TIMESTAMPTZ,
+  opening_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+  closing_amount NUMERIC(12,2),
+  expected_cash  NUMERIC(12,2),
+  difference     NUMERIC(12,2),
+  notes          TEXT,
+  status         TEXT NOT NULL DEFAULT 'open'
+                 CHECK (status IN ('open','closed')),
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE cash_sessions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Authenticated users can manage cash_sessions"
+  ON cash_sessions FOR ALL TO authenticated USING (true);`}
+          </pre>
+          <button
+            onClick={loadData}
+            className="mt-4 px-4 py-2 bg-amber-700 text-white rounded-xl text-sm font-medium hover:bg-amber-800 transition-colors"
+          >
+            🔄 Reintentar
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  const fechaDisplay = new Date(colombiaToday + 'T12:00:00Z').toLocaleDateString('es-CO', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+  })
 
   return (
-    <div>
-      {/* Filtros de categoría */}
-      <div className="flex gap-2 overflow-x-auto pb-2 mb-3 no-scrollbar">
-        <button
-          onClick={() => setActiveCategory(null)}
-          className={`flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${
-            !activeCategory
-              ? 'bg-amber-700 text-white shadow-sm'
-              : 'bg-white text-stone-600 border border-stone-200 hover:border-amber-300'
-          }`}
-        >
-          ⭐ Destacados
-        </button>
-        {categories.map((cat) => (
-          <button
-            key={cat.id}
-            onClick={() => setActiveCategory(cat.id === activeCategory ? null : cat.id)}
-            className={`flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${
-              activeCategory === cat.id
-                ? 'bg-amber-700 text-white shadow-sm'
-                : 'bg-white text-stone-600 border border-stone-200 hover:border-amber-300'
-            }`}
-          >
-            {cat.icon} {cat.name}
-          </button>
-        ))}
+    <div className="max-w-3xl mx-auto p-4 sm:p-6 space-y-5">
+      {/* ── Encabezado ─────────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-stone-800">💰 Caja</h1>
+          <p className="text-stone-500 text-sm capitalize">{fechaDisplay}</p>
+        </div>
+
+        {/* Estado de la caja */}
+        {session?.status === 'open' ? (
+          <span className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-100 text-emerald-700 text-sm font-semibold rounded-full">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            Abierta
+          </span>
+        ) : session?.status === 'closed' ? (
+          <span className="flex items-center gap-1.5 px-3 py-1.5 bg-red-100 text-red-700 text-sm font-semibold rounded-full">
+            🔒 Cerrada
+          </span>
+        ) : (
+          <span className="flex items-center gap-1.5 px-3 py-1.5 bg-stone-100 text-stone-500 text-sm font-semibold rounded-full">
+            Sin abrir
+          </span>
+        )}
       </div>
 
-      {filtered.length === 0 ? (
-        <div className="text-center py-12">
-          <p className="text-4xl mb-2">📦</p>
-          <p className="text-stone-400 text-sm">
-            {activeCategory ? 'Sin productos en esta categoría' : 'Marca productos como destacados para verlos aquí'}
+      {/* ── Alerta si no hay sesión ──────────────────────────────────────────── */}
+      {!session && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 text-center">
+          <p className="text-2xl mb-2">🔓</p>
+          <p className="font-semibold text-amber-800">La caja no ha sido abierta hoy</p>
+          <p className="text-amber-600 text-sm mt-1 mb-4">
+            Registra el efectivo inicial antes de empezar a vender.
           </p>
-          <a href="/productos/nuevo" className="text-amber-700 text-sm hover:underline mt-2 inline-block">
-            + Agregar producto
-          </a>
+          <button
+            onClick={() => setShowAbrir(true)}
+            className="px-6 py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-600/25"
+          >
+            🔓 Abrir Caja
+          </button>
         </div>
-      ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-2">
-          {filtered.map((product) => (
-            <button
-              key={product.id}
-              onClick={() => onSelect(product)}
-              disabled={product.stock <= 0}
-              className={`pos-grid-product bg-white rounded-xl border p-3 text-left hover:shadow-md transition-all active:scale-95 ${
-                product.stock <= 0
-                  ? 'border-red-200 opacity-50 cursor-not-allowed'
-                  : 'border-stone-200 hover:border-amber-300'
-              }`}
-            >
-              {product.image_url ? (
-                <img src={product.image_url} alt={product.name} className="w-full h-16 object-cover rounded-lg mb-2" />
-              ) : (
-                <div className="w-full h-16 bg-stone-100 rounded-lg mb-2 flex items-center justify-center">
-                  <span className="text-2xl">📦</span>
+      )}
+
+      {/* ── Sesión abierta ───────────────────────────────────────────────────── */}
+      {session && (
+        <>
+          {/* Info apertura */}
+          <div className="bg-white border border-stone-200 rounded-2xl p-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs text-stone-400 uppercase tracking-wide">Apertura</p>
+              <p className="text-lg font-bold text-stone-800">
+                {formatCurrency(session.opening_amount)}
+              </p>
+              <p className="text-xs text-stone-500">
+                {formatColombiaTime(session.opened_at)}
+              </p>
+            </div>
+            {session.status === 'closed' && session.closed_at && (
+              <div className="text-right">
+                <p className="text-xs text-stone-400 uppercase tracking-wide">Cierre</p>
+                <p className="text-lg font-bold text-stone-800">
+                  {formatCurrency(session.closing_amount ?? 0)}
+                </p>
+                <p className="text-xs text-stone-500">
+                  {formatColombiaTime(session.closed_at)}
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* KPIs del día */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="bg-white border border-stone-200 rounded-2xl p-4">
+              <p className="text-xs text-stone-400 uppercase tracking-wide">Ventas</p>
+              <p className="text-xl font-bold text-stone-800">{summary.sale_count}</p>
+              <p className="text-xs text-stone-500">transacciones</p>
+            </div>
+            <div className="bg-white border border-stone-200 rounded-2xl p-4">
+              <p className="text-xs text-stone-400 uppercase tracking-wide">Total</p>
+              <p className="text-xl font-bold text-amber-700">{formatCurrency(summary.total_sales)}</p>
+              <p className="text-xs text-stone-500">todos los métodos</p>
+            </div>
+            <div className="bg-white border border-stone-200 rounded-2xl p-4">
+              <p className="text-xs text-stone-400 uppercase tracking-wide">💵 Efectivo</p>
+              <p className="text-xl font-bold text-emerald-700">{formatCurrency(summary.cash_sales)}</p>
+              <p className="text-xs text-stone-500">en ventas</p>
+            </div>
+            <div className="bg-white border border-stone-200 rounded-2xl p-4">
+              <p className="text-xs text-stone-400 uppercase tracking-wide">📱 Digital</p>
+              <p className="text-xl font-bold text-blue-700">
+                {formatCurrency(summary.nequi_sales + summary.transfer_sales + summary.card_sales)}
+              </p>
+              <p className="text-xs text-stone-500">Nequi / Tarjeta / Transf.</p>
+            </div>
+          </div>
+
+          {/* Efectivo esperado en caja */}
+          {session.status === 'open' && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center justify-between">
+              <div>
+                <p className="text-xs text-emerald-700 font-semibold uppercase tracking-wide">
+                  Efectivo esperado en caja ahora
+                </p>
+                <p className="text-3xl font-bold text-emerald-800 mt-1">
+                  {formatCurrency(session.opening_amount + summary.cash_sales)}
+                </p>
+                <p className="text-xs text-emerald-600 mt-1">
+                  {formatCurrency(session.opening_amount)} apertura + {formatCurrency(summary.cash_sales)} ventas
+                </p>
+              </div>
+              <button
+                onClick={() => setShowCerrar(true)}
+                className="px-5 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition-colors shadow-lg shadow-red-600/25 text-sm"
+              >
+                🔒 Cerrar<br />Caja
+              </button>
+            </div>
+          )}
+
+          {/* Arqueo del cierre (si ya está cerrada) */}
+          {session.status === 'closed' && session.expected_cash !== null && (
+            <div className="bg-white border border-stone-200 rounded-2xl p-5">
+              <p className="text-sm font-bold text-stone-700 mb-4">📋 Arqueo del cierre</p>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-stone-500">Efectivo esperado</span>
+                  <span className="font-medium">{formatCurrency(session.expected_cash)}</span>
                 </div>
+                <div className="flex justify-between">
+                  <span className="text-stone-500">Efectivo contado</span>
+                  <span className="font-medium">{formatCurrency(session.closing_amount ?? 0)}</span>
+                </div>
+                <div className={`flex justify-between font-bold border-t border-stone-100 pt-2 mt-2 ${
+                  (session.difference ?? 0) < 0 ? 'text-red-600' : (session.difference ?? 0) > 0 ? 'text-blue-600' : 'text-emerald-600'
+                }`}>
+                  <span>Diferencia</span>
+                  <span>
+                    {(session.difference ?? 0) > 0 ? '+' : ''}{formatCurrency(session.difference ?? 0)}
+                  </span>
+                </div>
+              </div>
+              {session.notes && (
+                <p className="text-xs text-stone-400 mt-3 border-t border-stone-100 pt-3">
+                  Obs: {session.notes}
+                </p>
               )}
-              <p className="text-xs font-semibold text-stone-800 leading-tight line-clamp-2">{product.name}</p>
-              <p className="text-sm font-bold text-amber-700 mt-1">{formatCurrency(product.sale_price)}</p>
-              {product.stock <= 0 && (
-                <span className="text-[10px] text-red-500 font-medium">Agotado</span>
-              )}
-              {product.stock > 0 && product.stock <= product.min_stock && (
-                <span className="text-[10px] text-orange-500 font-medium">Stock bajo</span>
-              )}
-            </button>
-          ))}
+            </div>
+          )}
+
+          {/* Listado de ventas del día */}
+          {summary.sales.length > 0 && (
+            <div className="bg-white border border-stone-200 rounded-2xl overflow-hidden">
+              <div className="px-4 py-3 border-b border-stone-100">
+                <p className="font-semibold text-stone-800 text-sm">Ventas del día</p>
+              </div>
+              <div className="divide-y divide-stone-50 max-h-72 overflow-y-auto">
+                {summary.sales.map((sale) => {
+                  const cashAmt = sale.payments
+                    .filter((p) => p.payment_method === 'cash')
+                    .reduce((s, p) => s + p.amount, 0)
+                  const methodsSummary = sale.payments
+                    .map((p) => `${PAYMENT_LABELS[p.payment_method] ?? p.payment_method}`)
+                    .join(' + ')
+
+                  return (
+                    <div key={sale.id} className="px-4 py-3 flex items-center justify-between hover:bg-stone-50 transition-colors">
+                      <div>
+                        <p className="text-sm font-mono font-medium text-stone-800">
+                          {sale.sale_number}
+                        </p>
+                        <p className="text-xs text-stone-400">
+                          {formatColombiaTime(sale.created_at)} · {methodsSummary}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-bold text-stone-800 text-sm">{formatCurrency(sale.total)}</p>
+                        {cashAmt > 0 && (
+                          <p className="text-xs text-emerald-600">{formatCurrency(cashAmt)} efvo.</p>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {summary.sales.length === 0 && session.status === 'open' && (
+            <div className="bg-white border border-stone-200 rounded-2xl p-6 text-center">
+              <p className="text-3xl mb-2">🛒</p>
+              <p className="text-stone-400 text-sm">Aún no hay ventas registradas hoy.</p>
+              <a href="/pos" className="text-amber-700 text-sm hover:underline mt-1 inline-block font-medium">
+                Ir al Punto de Venta →
+              </a>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ── Error general ────────────────────────────────────────────────────── */}
+      {error && error !== 'tabla_no_existe' && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl">
+          {error}
         </div>
+      )}
+
+      {/* ── Modales ──────────────────────────────────────────────────────────── */}
+      {showAbrir && (
+        <AbrirCajaModal
+          onConfirm={handleAbrirCaja}
+          onClose={() => setShowAbrir(false)}
+        />
+      )}
+
+      {showCerrar && session && (
+        <CerrarCajaModal
+          session={session}
+          summary={summary}
+          onConfirm={handleCerrarCaja}
+          onClose={() => setShowCerrar(false)}
+        />
       )}
     </div>
   )
