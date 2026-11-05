@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+export const dynamic = 'force-dynamic' 
 import { useRouter } from 'next/navigation'
 
 export default function ResetPasswordPage() {
