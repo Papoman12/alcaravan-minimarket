@@ -344,6 +344,7 @@ export default function CajaPage() {
   const [egresos, setEgresos] = useState<DailyEgresos>({
     cash_purchases: 0, nequi_purchases: 0, cash_expenses: 0, nequi_expenses: 0,
   })
+  const [isAdmin, setIsAdmin] = useState(false)
   const [loading, setLoading] = useState(true)
   const [showAbrir, setShowAbrir] = useState(false)
   const [showCerrar, setShowCerrar] = useState(false)
@@ -358,6 +359,18 @@ export default function CajaPage() {
     setError('')
 
     try {
+      // Verificar si el usuario es administrador
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: profile } = await supabase
+          .from('users')
+          .select('role:roles(name)')
+          .eq('id', user.id)
+          .single()
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setIsAdmin((profile?.role as any)?.name === 'admin')
+      }
+
       // Buscar sesión de hoy
       const { data: sessionData, error: sessionError } = await supabase
         .from('cash_sessions')
@@ -485,6 +498,24 @@ export default function CajaPage() {
 
     setSession(data)
     setShowAbrir(false)
+  }
+
+  // ── Corregir monto de apertura ─────────────────────────────────────────────
+  async function handleEditApertura() {
+    if (!session) return
+    const input = prompt(
+      `Monto actual de apertura: $${session.opening_amount.toLocaleString('es-CO')}\n\nIngresa el monto correcto:`,
+      String(session.opening_amount)
+    )
+    if (input === null) return
+    const nuevo = parseFloat(input)
+    if (isNaN(nuevo) || nuevo < 0) { alert('Monto inválido'); return }
+    const { error } = await supabase
+      .from('cash_sessions')
+      .update({ opening_amount: nuevo })
+      .eq('id', session.id)
+    if (error) { alert('Error al actualizar: ' + error.message); return }
+    await loadData()
   }
 
   // ── Cerrar caja ────────────────────────────────────────────────────────────
@@ -621,9 +652,20 @@ CREATE POLICY "Authenticated users can manage cash_sessions"
           <div className="bg-white border border-stone-200 rounded-2xl p-4 flex items-center justify-between">
             <div>
               <p className="text-xs text-stone-400 uppercase tracking-wide">Apertura</p>
-              <p className="text-lg font-bold text-stone-800">
-                {formatCurrency(session.opening_amount)}
-              </p>
+              <div className="flex items-center gap-2 mt-0.5">
+                <p className="text-lg font-bold text-stone-800">
+                  {formatCurrency(session.opening_amount)}
+                </p>
+                {session.status === 'open' && isAdmin && (
+                  <button
+                    onClick={handleEditApertura}
+                    className="text-xs text-stone-400 hover:text-amber-700 transition-colors px-1.5 py-0.5 rounded-lg hover:bg-amber-50 border border-transparent hover:border-amber-200"
+                    title="Corregir monto de apertura (solo administrador)"
+                  >
+                    ✏️ corregir
+                  </button>
+                )}
+              </div>
               <p className="text-xs text-stone-500">
                 {formatColombiaTime(session.opened_at)}
               </p>
