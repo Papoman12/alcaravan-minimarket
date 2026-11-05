@@ -2,211 +2,289 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useIsAdmin } from '@/lib/useIsAdmin'
-
-const BRANCH_ID = '56916f1b-17dc-4c3d-8e65-a7d2a6554891'
+import { formatCurrency } from '@/lib/utils'
+import { getColombiaDate, formatColombiaDateTime } from '@/lib/colombia-time'
 
 interface Expense {
   id: string
-  date: string
-  category: string
-  description?: string
+  description: string
   amount: number
-  payment_method?: string
-  notes?: string
+  category: string
+  payment_method: string
   created_at: string
+  notes?: string
 }
 
-const CATEGORIES = ['Arriendo', 'Servicios públicos', 'Nómina', 'Proveedores', 'Mantenimiento', 'Marketing', 'Transporte', 'Otros']
-const PAYMENT_METHODS = ['Efectivo', 'Transferencia', 'Nequi', 'Daviplata', 'Tarjeta']
+const CATEGORIES = [
+  'Arriendo',
+  'Servicios públicos',
+  'Nómina',
+  'Transporte',
+  'Mantenimiento',
+  'Papelería',
+  'Aseo',
+  'Publicidad',
+  'Otros',
+]
+
+const PAYMENT_ICONS: Record<string, string> = {
+  cash: '💵 Efectivo',
+  nequi: '📱 Nequi',
+  transfer: '🏦 Transferencia',
+  card: '💳 Tarjeta',
+}
+
+function NuevoGastoModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const supabase = createClient()
+  const [form, setForm] = useState({
+    description: '',
+    amount: '',
+    category: 'Otros',
+    payment_method: 'cash',
+    notes: '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleSave() {
+    if (!form.description.trim() || !form.amount) {
+      setError('Completa descripción y monto')
+      return
+    }
+    setError('')
+    setSaving(true)
+    try {
+      const { error: err } = await supabase.from('expenses').insert({
+        description: form.description.trim(),
+        amount: parseFloat(form.amount),
+        category: form.category,
+        payment_method: form.payment_method,
+        notes: form.notes || null,
+        date: getColombiaDate(),
+      })
+      if (err) throw err
+      onSaved()
+    } catch (e) {
+      console.error(e)
+      setError('Error al guardar. Verifica que la tabla expenses exista.')
+    }
+    setSaving(false)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="flex items-center justify-between p-5 border-b border-stone-100">
+          <h3 className="text-lg font-bold text-stone-800">Nuevo Gasto</h3>
+          <button onClick={onClose} className="text-stone-400 hover:text-stone-600 text-2xl leading-none">&times;</button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {/* Descripción */}
+          <div>
+            <label className="block text-sm font-medium text-stone-700 mb-1">Descripción *</label>
+            <input
+              type="text"
+              value={form.description}
+              onChange={e => setForm({ ...form, description: e.target.value })}
+              placeholder="Ej: Pago luz EPM, escoba, taxi..."
+              className="w-full px-3 py-2.5 rounded-xl border border-stone-200 text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-700"
+              autoFocus
+            />
+          </div>
+
+          {/* Monto */}
+          <div>
+            <label className="block text-sm font-medium text-stone-700 mb-1">Monto ($) *</label>
+            <input
+              type="number"
+              value={form.amount}
+              onChange={e => setForm({ ...form, amount: e.target.value })}
+              placeholder="0"
+              min="0"
+              step="100"
+              className="w-full px-3 py-2.5 rounded-xl border border-stone-200 text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-700"
+            />
+          </div>
+
+          {/* Categoría */}
+          <div>
+            <label className="block text-sm font-medium text-stone-700 mb-1">Categoría</label>
+            <select
+              value={form.category}
+              onChange={e => setForm({ ...form, category: e.target.value })}
+              className="w-full px-3 py-2.5 rounded-xl border border-stone-200 text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-700"
+            >
+              {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+
+          {/* Método de pago */}
+          <div>
+            <label className="block text-sm font-medium text-stone-700 mb-1">Pagado con</label>
+            <div className="grid grid-cols-4 gap-2">
+              {Object.entries(PAYMENT_ICONS).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setForm({ ...form, payment_method: key })}
+                  className={`py-2 px-1 rounded-xl text-xs font-medium text-center transition-all border ${
+                    form.payment_method === key
+                      ? 'bg-amber-700 text-white border-amber-700'
+                      : 'bg-stone-50 text-stone-600 border-stone-200 hover:border-amber-300'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Notas */}
+          <div>
+            <label className="block text-sm font-medium text-stone-700 mb-1">Notas (opcional)</label>
+            <input
+              type="text"
+              value={form.notes}
+              onChange={e => setForm({ ...form, notes: e.target.value })}
+              placeholder="Observación..."
+              className="w-full px-3 py-2.5 rounded-xl border border-stone-200 text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-700"
+            />
+          </div>
+
+          {error && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-xl">{error}</p>}
+        </div>
+
+        <div className="flex gap-3 p-5 border-t border-stone-100">
+          <button onClick={onClose} className="flex-1 py-2.5 border border-stone-200 rounded-xl text-stone-600 hover:bg-stone-50 font-medium">
+            Cancelar
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving || !form.description || !form.amount}
+            className="flex-1 py-2.5 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 disabled:bg-stone-300 transition-colors"
+          >
+            {saving ? 'Guardando...' : 'Registrar gasto'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function GastosPage() {
-  const isAdmin = useIsAdmin()
+  const supabase = createClient()
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [editing, setEditing] = useState<Expense | null>(null)
-  const [error, setError] = useState('')
-  const [form, setForm] = useState({
-    date: new Date().toISOString().split('T')[0],
-    category: 'Otros',
-    description: '',
-    amount: '',
-    payment_method: 'Efectivo',
-    notes: '',
-  })
+  const [filterDate, setFilterDate] = useState(getColombiaDate())
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+  }, [filterDate]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function load() {
     setLoading(true)
-    const supabase = createClient()
     const { data } = await supabase
       .from('expenses')
       .select('*')
-      .order('date', { ascending: false })
-      .limit(100)
-    setExpenses(data ?? [])
+      .eq('date', filterDate)
+      .order('created_at', { ascending: false })
+    setExpenses((data ?? []) as Expense[])
     setLoading(false)
   }
 
-  function openNew() {
-    setEditing(null)
-    setError('')
-    setForm({ date: new Date().toISOString().split('T')[0], category: 'Otros', description: '', amount: '', payment_method: 'Efectivo', notes: '' })
-    setShowModal(true)
-  }
-
-  function openEdit(e: Expense) {
-    setEditing(e)
-    setError('')
-    setForm({
-      date: e.date,
-      category: e.category,
-      description: e.description ?? '',
-      amount: e.amount.toString(),
-      payment_method: e.payment_method ?? 'Efectivo',
-      notes: e.notes ?? '',
-    })
-    setShowModal(true)
-  }
-
-  async function handleSave() {
-    if (!form.amount || !form.date) { setError('Monto y fecha son obligatorios'); return }
-    setSaving(true)
-    setError('')
-    const supabase = createClient()
-    const payload = {
-      branch_id: BRANCH_ID,
-      date: form.date,
-      category: form.category,
-      description: form.description.trim() || null,
-      amount: parseFloat(form.amount),
-      payment_method: form.payment_method,
-      notes: form.notes.trim() || null,
-    }
-    if (editing) {
-      const { error: err } = await supabase.from('expenses').update(payload).eq('id', editing.id)
-      if (err) { setError('Error al actualizar: ' + err.message); setSaving(false); return }
-    } else {
-      const { error: err } = await supabase.from('expenses').insert(payload)
-      if (err) { setError('Error al guardar: ' + err.message); setSaving(false); return }
-    }
-    setSaving(false)
-    setShowModal(false)
-    load()
-  }
-
   async function handleDelete(id: string) {
-    if (!window.confirm('¿Eliminar este gasto? Esta acción no se puede deshacer.')) return
-    const supabase = createClient()
-    const { error: err } = await supabase.from('expenses').delete().eq('id', id)
-    if (err) { alert('Error al eliminar: ' + err.message); return }
+    if (!confirm('¿Eliminar este gasto?')) return
+    await supabase.from('expenses').delete().eq('id', id)
     load()
   }
 
-  const total = expenses.reduce((s, e) => s + e.amount, 0)
-  const fmt = (n: number) => '$' + n.toLocaleString('es-CO')
+  const totalEfectivo = expenses.filter(e => e.payment_method === 'cash').reduce((s, e) => s + e.amount, 0)
+  const totalNequi = expenses.filter(e => e.payment_method === 'nequi').reduce((s, e) => s + e.amount, 0)
+  const totalDia = expenses.reduce((s, e) => s + e.amount, 0)
 
   return (
     <div className="p-4 max-w-4xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-stone-800">Gastos</h1>
-          <p className="text-stone-500 text-sm mt-0.5">{expenses.length} registros · Total: {fmt(total)}</p>
+          <p className="text-stone-500 text-sm mt-0.5">Egresos operativos del negocio</p>
         </div>
-        <button onClick={openNew} className="px-4 py-2 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 transition-colors">
-          + Nuevo Gasto
-        </button>
+        <div className="flex gap-3 items-center">
+          <input
+            type="date"
+            value={filterDate}
+            onChange={e => setFilterDate(e.target.value)}
+            className="px-3 py-2 rounded-xl border border-stone-200 text-sm text-stone-700 focus:outline-none focus:ring-2 focus:ring-amber-700"
+          />
+          <button
+            onClick={() => setShowModal(true)}
+            className="px-4 py-2 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 transition-colors shadow-lg shadow-amber-700/20"
+          >
+            + Nuevo Gasto
+          </button>
+        </div>
       </div>
 
+      {/* Resumen del día */}
+      <div className="grid grid-cols-3 gap-3 mb-5">
+        <div className="bg-white rounded-2xl border border-stone-200 p-4">
+          <p className="text-xs text-stone-500 font-medium uppercase tracking-wide">Total del día</p>
+          <p className="text-xl font-bold text-red-600 mt-1">{formatCurrency(totalDia)}</p>
+        </div>
+        <div className="bg-white rounded-2xl border border-stone-200 p-4">
+          <p className="text-xs text-stone-500 font-medium uppercase tracking-wide">💵 En efectivo</p>
+          <p className="text-xl font-bold text-stone-800 mt-1">{formatCurrency(totalEfectivo)}</p>
+        </div>
+        <div className="bg-white rounded-2xl border border-stone-200 p-4">
+          <p className="text-xs text-stone-500 font-medium uppercase tracking-wide">📱 Por Nequi</p>
+          <p className="text-xl font-bold text-stone-800 mt-1">{formatCurrency(totalNequi)}</p>
+        </div>
+      </div>
+
+      {/* Lista */}
       {loading ? (
-        <div className="flex justify-center py-16"><div className="w-8 h-8 border-4 border-amber-700 border-t-transparent rounded-full animate-spin" /></div>
+        <div className="flex justify-center py-16">
+          <div className="w-8 h-8 border-4 border-amber-700 border-t-transparent rounded-full animate-spin" />
+        </div>
       ) : expenses.length === 0 ? (
-        <div className="text-center py-16"><p className="text-5xl mb-3">💸</p><p className="text-stone-500">No hay gastos registrados</p></div>
+        <div className="text-center py-16">
+          <p className="text-5xl mb-3">💸</p>
+          <p className="text-stone-500">No hay gastos registrados para este día</p>
+        </div>
       ) : (
-        <div className="grid gap-3">
-          {expenses.map(e => (
-            <div key={e.id} className="bg-white rounded-2xl border border-stone-200 p-4 flex items-center gap-4">
-              <div className="w-12 h-12 bg-red-50 rounded-xl flex items-center justify-center flex-shrink-0">
-                <span className="text-2xl">💸</span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p className="font-semibold text-stone-800">{e.category}</p>
-                  <span className="text-xs bg-stone-100 text-stone-600 px-2 py-0.5 rounded-full">{e.payment_method}</span>
+        <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden">
+          <div className="divide-y divide-stone-100">
+            {expenses.map(e => (
+              <div key={e.id} className="flex items-center gap-3 px-4 py-3 hover:bg-stone-50 transition-colors">
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-stone-800 text-sm">{e.description}</p>
+                  <p className="text-xs text-stone-400 mt-0.5">
+                    {e.category} · {PAYMENT_ICONS[e.payment_method] ?? e.payment_method} · {formatColombiaDateTime(e.created_at)}
+                  </p>
+                  {e.notes && <p className="text-xs text-stone-400 italic">{e.notes}</p>}
                 </div>
-                {e.description && <p className="text-sm text-stone-500 mt-0.5">{e.description}</p>}
-                <div className="flex gap-3 mt-0.5 flex-wrap">
-                  <span className="text-sm font-bold text-red-600">{fmt(e.amount)}</span>
-                  <span className="text-sm text-stone-400">{new Date(e.date + 'T12:00:00').toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
-                </div>
+                <p className="font-bold text-red-600 text-sm whitespace-nowrap">{formatCurrency(e.amount)}</p>
+                <button
+                  onClick={() => handleDelete(e.id)}
+                  className="text-stone-300 hover:text-red-500 transition-colors px-1 text-sm"
+                  title="Eliminar"
+                >
+                  🗑
+                </button>
               </div>
-              <div className="flex gap-2 flex-shrink-0">
-                <button onClick={() => openEdit(e)} className="px-3 py-1.5 text-sm border border-stone-200 rounded-lg text-stone-600 hover:bg-stone-50">Editar</button>
-                {isAdmin && (
-                  <button onClick={() => handleDelete(e.id)} className="px-3 py-1.5 text-sm bg-red-50 text-red-600 rounded-lg hover:bg-red-100">Eliminar</button>
-                )}
-              </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       )}
 
       {showModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
-            <h3 className="text-lg font-bold text-stone-800 mb-4">{editing ? 'Editar Gasto' : 'Nuevo Gasto'}</h3>
-            {error && <div className="bg-red-50 text-red-700 rounded-xl px-3 py-2 text-sm mb-4">{error}</div>}
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-stone-700 mb-1">Fecha *</label>
-                  <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })}
-                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-stone-700 mb-1">Monto *</label>
-                  <input type="number" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} placeholder="0"
-                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-stone-700 mb-1">Categoría</label>
-                  <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}
-                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700">
-                    {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-stone-700 mb-1">Método de pago</label>
-                  <select value={form.payment_method} onChange={e => setForm({ ...form, payment_method: e.target.value })}
-                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700">
-                    {PAYMENT_METHODS.map(p => <option key={p} value={p}>{p}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-stone-700 mb-1">Descripción</label>
-                <input type="text" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Detalle del gasto"
-                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-stone-700 mb-1">Notas</label>
-                <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} rows={2} placeholder="Observaciones..."
-                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700 resize-none" />
-              </div>
-            </div>
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowModal(false)} className="flex-1 py-2.5 border border-stone-200 rounded-xl text-stone-600 hover:bg-stone-50">Cancelar</button>
-              <button onClick={handleSave} disabled={saving} className="flex-1 py-2.5 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 disabled:bg-stone-300">
-                {saving ? 'Guardando...' : editing ? 'Actualizar' : 'Guardar'}
-              </button>
-            </div>
-          </div>
-        </div>
+        <NuevoGastoModal
+          onClose={() => setShowModal(false)}
+          onSaved={() => { setShowModal(false); load() }}
+        />
       )}
     </div>
   )
