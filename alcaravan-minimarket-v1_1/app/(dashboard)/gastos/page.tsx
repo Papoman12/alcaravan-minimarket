@@ -34,7 +34,15 @@ const PAYMENT_ICONS: Record<string, string> = {
   card: '💳 Tarjeta',
 }
 
-function NuevoGastoModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+function NuevoGastoModal({
+  onClose,
+  onSaved,
+  defaultDate,
+}: {
+  onClose: () => void
+  onSaved: () => void
+  defaultDate: string
+}) {
   const supabase = createClient()
   const [form, setForm] = useState({
     description: '',
@@ -42,6 +50,7 @@ function NuevoGastoModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
     category: 'Otros',
     payment_method: 'cash',
     notes: '',
+    date: defaultDate,
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -60,7 +69,7 @@ function NuevoGastoModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
         category: form.category,
         payment_method: form.payment_method,
         notes: form.notes || null,
-        date: getColombiaDate(),
+        date: form.date,
       })
       if (err) throw err
       onSaved()
@@ -80,6 +89,18 @@ function NuevoGastoModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
         </div>
 
         <div className="p-5 space-y-4">
+          {/* Fecha */}
+          <div>
+            <label className="block text-sm font-medium text-stone-700 mb-1">Fecha</label>
+            <input
+              type="date"
+              value={form.date}
+              onChange={e => setForm({ ...form, date: e.target.value })}
+              max={getColombiaDate()}
+              className="w-full px-3 py-2.5 rounded-xl border border-stone-200 text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-700"
+            />
+          </div>
+
           {/* Descripción */}
           <div>
             <label className="block text-sm font-medium text-stone-700 mb-1">Descripción *</label>
@@ -284,6 +305,7 @@ export default function GastosPage() {
         <NuevoGastoModal
           onClose={() => setShowModal(false)}
           onSaved={() => { setShowModal(false); load() }}
+          defaultDate={filterDate}
         />
       )}
     </div>
