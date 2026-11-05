@@ -72,6 +72,13 @@ interface DailySummary {
   }[]
 }
 
+interface DailyEgresos {
+  cash_purchases: number
+  nequi_purchases: number
+  cash_expenses: number
+  nequi_expenses: number
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const PAYMENT_LABELS: Record<string, string> = {
@@ -334,6 +341,9 @@ export default function CajaPage() {
     transfer_sales: 0, card_sales: 0, other_sales: 0,
     sale_count: 0, sales: [],
   })
+  const [egresos, setEgresos] = useState<DailyEgresos>({
+    cash_purchases: 0, nequi_purchases: 0, cash_expenses: 0, nequi_expenses: 0,
+  })
   const [loading, setLoading] = useState(true)
   const [showAbrir, setShowAbrir] = useState(false)
   const [showCerrar, setShowCerrar] = useState(false)
@@ -408,6 +418,42 @@ export default function CajaPage() {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         sales: (sales as any[]).map(s => ({ ...s, payments: s.sale_payments ?? [] })) as DailySummary['sales'],
       })
+
+      // ── Egresos del día: compras y gastos pagados en efectivo/Nequi ──────────
+      const egresosResult: DailyEgresos = {
+        cash_purchases: 0, nequi_purchases: 0,
+        cash_expenses: 0, nequi_expenses: 0,
+      }
+
+      // Compras de hoy pagadas en efectivo o Nequi
+      const { data: purchasesData } = await supabase
+        .from('purchases')
+        .select('total, payment_method')
+        .gte('created_at', todayFrom)
+        .lt('created_at', todayTo)
+        .eq('status', 'received')
+        .in('payment_method', ['cash', 'nequi'])
+
+      for (const p of (purchasesData ?? [])) {
+        if (p.payment_method === 'cash') egresosResult.cash_purchases += p.total
+        else if (p.payment_method === 'nequi') egresosResult.nequi_purchases += p.total
+      }
+
+      // Gastos de hoy pagados en efectivo o Nequi
+      await Promise.resolve(
+        supabase
+          .from('expenses')
+          .select('amount, payment_method')
+          .eq('date', colombiaToday)
+          .in('payment_method', ['cash', 'nequi'])
+      ).then(({ data: expData }) => {
+        for (const e of (expData ?? [])) {
+          if (e.payment_method === 'cash') egresosResult.cash_expenses += e.amount
+          else if (e.payment_method === 'nequi') egresosResult.nequi_expenses += e.amount
+        }
+      }).catch(() => {}) // Si la tabla expenses no existe, ignorar
+
+      setEgresos(egresosResult)
     } catch (err) {
       console.error(err)
       setError('No se pudo cargar la información de caja.')
@@ -444,7 +490,9 @@ export default function CajaPage() {
   // ── Cerrar caja ────────────────────────────────────────────────────────────
   async function handleCerrarCaja(closingAmount: number, notes: string) {
     if (!session) return
-    const expectedCash = session.opening_amount + summary.cash_sales
+    const expectedCash =
+      session.opening_amount + summary.cash_sales
+      - egresos.cash_purchases - egresos.cash_expenses
     const difference = closingAmount - expectedCash
 
     const { error } = await supabase
@@ -619,28 +667,77 @@ CREATE POLICY "Authenticated users can manage cash_sessions"
             </div>
           </div>
 
-          {/* Efectivo esperado en caja */}
-          {session.status === 'open' && (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center justify-between">
-              <div>
-                <p className="text-xs text-emerald-700 font-semibold uppercase tracking-wide">
-                  Efectivo esperado en caja ahora
-                </p>
-                <p className="text-3xl font-bold text-emerald-800 mt-1">
-                  {formatCurrency(session.opening_amount + summary.cash_sales)}
-                </p>
-                <p className="text-xs text-emerald-600 mt-1">
-                  {formatCurrency(session.opening_amount)} apertura + {formatCurrency(summary.cash_sales)} ventas
-                </p>
+          {/* Egresos del día */}
+          {(egresos.cash_purchases + egresos.nequi_purchases + egresos.cash_expenses + egresos.nequi_expenses) > 0 && (
+            <div className="bg-white border border-stone-200 rounded-2xl p-4">
+              <p className="text-xs text-stone-500 font-semibold uppercase tracking-wide mb-3">📤 Egresos del día</p>
+              <div className="space-y-2 text-sm">
+                {egresos.cash_purchases > 0 && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-stone-500">💵 Compras en efectivo</span>
+                    <span className="font-semibold text-red-600">− {formatCurrency(egresos.cash_purchases)}</span>
+                  </div>
+                )}
+                {egresos.nequi_purchases > 0 && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-stone-500">📱 Compras por Nequi</span>
+                    <span className="font-semibold text-red-600">− {formatCurrency(egresos.nequi_purchases)}</span>
+                  </div>
+                )}
+                {egresos.cash_expenses > 0 && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-stone-500">💵 Gastos en efectivo</span>
+                    <span className="font-semibold text-red-600">− {formatCurrency(egresos.cash_expenses)}</span>
+                  </div>
+                )}
+                {egresos.nequi_expenses > 0 && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-stone-500">📱 Gastos por Nequi</span>
+                    <span className="font-semibold text-red-600">− {formatCurrency(egresos.nequi_expenses)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between items-center border-t border-stone-100 pt-2 font-bold">
+                  <span className="text-stone-700">Total egresos</span>
+                  <span className="text-red-600">
+                    − {formatCurrency(
+                      egresos.cash_purchases + egresos.nequi_purchases +
+                      egresos.cash_expenses + egresos.nequi_expenses
+                    )}
+                  </span>
+                </div>
               </div>
-              <button
-                onClick={() => setShowCerrar(true)}
-                className="px-5 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition-colors shadow-lg shadow-red-600/25 text-sm"
-              >
-                🔒 Cerrar<br />Caja
-              </button>
             </div>
           )}
+
+          {/* Efectivo esperado en caja */}
+          {session.status === 'open' && (() => {
+            const efectivoEsperado = session.opening_amount + summary.cash_sales - egresos.cash_purchases - egresos.cash_expenses
+            return (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-emerald-700 font-semibold uppercase tracking-wide">
+                    Efectivo esperado en caja ahora
+                  </p>
+                  <p className="text-3xl font-bold text-emerald-800 mt-1">
+                    {formatCurrency(efectivoEsperado)}
+                  </p>
+                  <p className="text-xs text-emerald-600 mt-1">
+                    {formatCurrency(session.opening_amount)} apertura
+                    + {formatCurrency(summary.cash_sales)} ventas
+                    {(egresos.cash_purchases + egresos.cash_expenses) > 0 && (
+                      ` − ${formatCurrency(egresos.cash_purchases + egresos.cash_expenses)} egresos`
+                    )}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowCerrar(true)}
+                  className="px-5 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition-colors shadow-lg shadow-red-600/25 text-sm"
+                >
+                  🔒 Cerrar<br />Caja
+                </button>
+              </div>
+            )
+          })()}
 
           {/* Arqueo del cierre (si ya está cerrada) */}
           {session.status === 'closed' && session.expected_cash !== null && (
