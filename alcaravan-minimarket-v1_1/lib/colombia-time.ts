@@ -17,16 +17,13 @@ export function getColombiaDate(date?: Date | string): string {
 
 /**
  * Retorna el rango UTC que corresponde a un día calendario en Colombia.
- * @param colombiaDate  'YYYY-MM-DD' — si se omite, usa hoy Colombia
  */
 export function getColombiaDateUTCRange(colombiaDate?: string): {
   from: string
   to: string
 } {
   const dateStr = colombiaDate ?? getColombiaDate()
-  // Medianoche Colombia (00:00 COT) = 05:00:00 UTC
   const from = new Date(`${dateStr}T05:00:00.000Z`)
-  // Fin del día Colombia (23:59:59 COT) = 04:59:59 UTC del día siguiente
   const to = new Date(from.getTime() + 24 * 60 * 60 * 1000)
   return {
     from: from.toISOString(),
@@ -34,10 +31,7 @@ export function getColombiaDateUTCRange(colombiaDate?: string): {
   }
 }
 
-/**
- * Formatea un timestamp UTC a hora Colombia legible.
- * Ej: "5 nov 2026, 08:35 p.m."
- */
+/** Formatea un timestamp UTC a fecha y hora Colombia legible */
 export function formatColombiaDateTime(utcDate: string | Date): string {
   const ref = typeof utcDate === 'string' ? new Date(utcDate) : utcDate
   return ref.toLocaleString('es-CO', {
@@ -50,10 +44,7 @@ export function formatColombiaDateTime(utcDate: string | Date): string {
   })
 }
 
-/**
- * Formatea solo la hora Colombia.
- * Ej: "08:35 p.m."
- */
+/** Formatea solo la hora Colombia */
 export function formatColombiaTime(utcDate: string | Date): string {
   const ref = typeof utcDate === 'string' ? new Date(utcDate) : utcDate
   return ref.toLocaleTimeString('es-CO', {
