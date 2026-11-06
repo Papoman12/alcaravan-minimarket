@@ -275,7 +275,7 @@ function SaleDetailModal({
             <button onClick={() => onEdit(sale)} className="flex-1 py-2.5 border-2 border-amber-300 rounded-xl text-amber-700 font-semibold hover:bg-amber-50 flex items-center justify-center gap-2 text-sm">
               ✏️ Editar
             </button>
-            {sale.status === 'completed' && (sale.sale_items ?? []).length > 0 && (
+            {(sale.sale_items ?? []).length > 0 && sale.status !== 'returned' && (
               <button
                 onClick={() => onReturn(sale)}
                 className="flex-1 py-2.5 border-2 border-purple-300 rounded-xl text-purple-700 font-semibold hover:bg-purple-50 flex items-center justify-center gap-2 text-sm"
