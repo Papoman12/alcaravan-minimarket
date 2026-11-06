@@ -3,10 +3,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency } from '@/lib/utils'
+import { getColombiaDateUTCRange } from '@/lib/colombia-time'
 
 // ─── Tipos ──────────────────────────────────────────────────────────
 interface SaleItem {
   id: string
+  product_id?: string
   product_name: string
   product_code?: string
   quantity: number
@@ -73,7 +75,9 @@ function getCustomerName(c?: Sale['customers']) {
 }
 
 function formatDate(d: string) {
+  // Siempre mostrar en hora Colombia (UTC-5)
   return new Date(d).toLocaleString('es-CO', {
+    timeZone: 'America/Bogota',
     day: '2-digit', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   })
@@ -85,11 +89,13 @@ function SaleDetailModal({
   onClose,
   onAddPayment,
   onEdit,
+  onReturn,
 }: {
   sale: Sale
   onClose: () => void
   onAddPayment: (sale: Sale) => void
   onEdit: (sale: Sale) => void
+  onReturn: (sale: Sale) => void
 }) {
   const isPending = sale.status === 'pending'
   const pendingAmount = (sale.pending_amount ?? 0)
@@ -97,54 +103,53 @@ function SaleDetailModal({
   function handlePrint() {
     const w = window.open('', '_blank', 'width=400,height=700')
     if (!w) return
-    const items = (sale.sale_items ?? [])
-      .map(i => `
-        <tr>
-          <td style="padding:4px 0;">${i.product_name}</td>
-          <td style="text-align:center;padding:4px 4px;">${i.quantity}</td>
-          <td style="text-align:right;padding:4px 0;">${formatCurrency(i.unit_price)}</td>
-          <td style="text-align:right;padding:4px 0;">${formatCurrency(i.total)}</td>
-        </tr>`)
-      .join('')
-    const payments = (sale.sale_payments ?? [])
-      .map(p => `<div style="display:flex;justify-content:space-between;font-size:11px;">
-        <span>${PAYMENT_LABELS[p.payment_method] ?? p.payment_method}</span>
-        <span>${formatCurrency(p.amount)}</span>
-      </div>`)
-      .join('')
     w.document.write(`<!DOCTYPE html><html><head>
-      <meta charset="utf-8">
+      <meta charset="UTF-8"><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
       <style>
-        body{font-family:monospace;font-size:12px;width:80mm;margin:0;padding:8px;}
-        h2{text-align:center;margin:4px 0;font-size:16px;}
-        .sub{text-align:center;font-size:10px;color:#666;margin-bottom:8px;}
-        table{width:100%;border-collapse:collapse;font-size:11px;}
-        th{border-bottom:1px dashed #999;padding:4px 0;font-size:10px;text-align:left;}
-        th:nth-child(2){text-align:center;}
-        th:nth-child(3),th:nth-child(4){text-align:right;}
-        hr{border:none;border-top:1px dashed #999;margin:8px 0;}
-        .total{font-size:14px;font-weight:bold;display:flex;justify-content:space-between;margin-top:6px;}
+        @page{margin:2mm}
+        body{font-family:Arial,sans-serif;font-size:11px;width:70mm;margin:0 auto;padding:6px;color:#000}
+        h2{text-align:center;margin:4px 0;font-size:15px;font-weight:bold}
+        .sub{text-align:center;font-size:10px;color:#444;margin-bottom:6px}
+        hr{border:none;border-top:1px dashed #999;margin:5px 0}
+        table{width:100%;border-collapse:collapse;font-size:10px}
+        th{font-size:10px;font-weight:bold;padding:3px 2px;border-bottom:1px dashed #999}
+        th.prod{text-align:left;width:60%}
+        th.qty{text-align:center;width:15%}
+        th.price{text-align:right;width:25%}
+        td.prod{text-align:left;padding:3px 2px;word-break:break-word}
+        td.qty{text-align:center;padding:3px 2px}
+        td.price{text-align:right;padding:3px 2px}
+        .totrow{display:table;width:100%;font-size:10px;margin:2px 0}
+        .totrow span:first-child{display:table-cell;text-align:left}
+        .totrow span:last-child{display:table-cell;text-align:right}
+        .grandtotal{display:table;width:100%;font-size:13px;font-weight:bold;margin-top:4px}
+        .grandtotal span:first-child{display:table-cell;text-align:left}
+        .grandtotal span:last-child{display:table-cell;text-align:right}
+        .footer{text-align:center;margin-top:8px;font-size:9px;color:#666}
       </style>
     </head><body>
-      <h2>ALCARAVÁN</h2>
-      <div class="sub">Minimarket &amp; Cafetería<br>${formatDate(sale.created_at)}<br><b>${sale.sale_number}</b></div>
-      ${sale.customers ? `<div style="font-size:11px;margin-bottom:4px;">Cliente: <b>${getCustomerName(sale.customers)}</b></div>` : ''}
+      <h2>Alcarav&aacute;n</h2>
+      <div class="sub">Minimarket - Caf&eacute;<br>${formatDate(sale.created_at)}<br><b>${sale.sale_number}</b></div>
+      ${sale.customers ? `<div style="font-size:10px;margin-bottom:4px;">Cliente: <b>${getCustomerName(sale.customers)}</b></div>` : ''}
       <table>
-        <thead><tr><th>Producto</th><th>Cant</th><th>Precio</th><th>Total</th></tr></thead>
-        <tbody>${items}</tbody>
+        <thead><tr><th class="prod">Producto</th><th class="qty">Cant</th><th class="price">Total</th></tr></thead>
+        <tbody>
+          ${(sale.sale_items ?? []).map(i => `<tr>
+            <td class="prod">${i.product_name}</td>
+            <td class="qty">${i.quantity}</td>
+            <td class="price">${formatCurrency(i.total)}</td>
+          </tr>`).join('')}
+        </tbody>
       </table>
       <hr>
-      <div style="font-size:11px;">
-        <div style="display:flex;justify-content:space-between;"><span>Subtotal</span><span>${formatCurrency(sale.subtotal)}</span></div>
-        ${sale.discount_amount > 0 ? `<div style="display:flex;justify-content:space-between;color:green;"><span>Descuento</span><span>-${formatCurrency(sale.discount_amount)}</span></div>` : ''}
-        ${sale.tax_amount > 0 ? `<div style="display:flex;justify-content:space-between;"><span>IVA</span><span>${formatCurrency(sale.tax_amount)}</span></div>` : ''}
-      </div>
-      <div class="total"><span>TOTAL</span><span>${formatCurrency(sale.total)}</span></div>
+      <div class="totrow"><span>Subtotal</span><span>${formatCurrency(sale.subtotal)}</span></div>
+      ${sale.discount_amount > 0 ? `<div class="totrow"><span>Descuento</span><span>-${formatCurrency(sale.discount_amount)}</span></div>` : ''}
+      ${sale.tax_amount > 0 ? `<div class="totrow"><span>IVA</span><span>${formatCurrency(sale.tax_amount)}</span></div>` : ''}
+      <div class="grandtotal"><span>TOTAL</span><span>${formatCurrency(sale.total)}</span></div>
       <hr>
-      <div style="font-size:11px;font-weight:bold;margin-bottom:4px;">Pagos:</div>
-      ${payments}
-      ${isPending ? `<div style="margin-top:8px;padding:6px;border:1px dashed #f90;font-size:11px;color:#c60;text-align:center;"><b>PENDIENTE: ${formatCurrency(pendingAmount)}</b></div>` : ''}
-      <div style="text-align:center;margin-top:12px;font-size:10px;color:#999;">¡Gracias por su compra!</div>
+      ${(sale.sale_payments ?? []).map(p => `<div class="totrow"><span>${PAYMENT_LABELS[p.payment_method] ?? p.payment_method}</span><span>${formatCurrency(p.amount)}</span></div>`).join('')}
+      ${isPending ? `<div style="margin-top:6px;padding:4px;border:1px dashed #f90;font-size:10px;color:#c60;text-align:center;"><b>PENDIENTE: ${formatCurrency(pendingAmount)}</b></div>` : ''}
+      <div class="footer">&#161;Gracias por su compra!</div>
     </body></html>`)
     w.document.close()
     w.focus()
@@ -264,12 +269,20 @@ function SaleDetailModal({
         {/* Footer */}
         <div className="px-5 py-4 border-t space-y-2">
           <div className="flex gap-2">
-            <button onClick={handlePrint} className="flex-1 py-2.5 border border-stone-200 rounded-xl text-stone-700 font-medium hover:bg-stone-50 flex items-center justify-center gap-2">
+            <button onClick={handlePrint} className="flex-1 py-2.5 border border-stone-200 rounded-xl text-stone-700 font-medium hover:bg-stone-50 flex items-center justify-center gap-2 text-sm">
               🖨️ Imprimir
             </button>
-            <button onClick={() => onEdit(sale)} className="flex-1 py-2.5 border-2 border-amber-300 rounded-xl text-amber-700 font-semibold hover:bg-amber-50 flex items-center justify-center gap-2">
+            <button onClick={() => onEdit(sale)} className="flex-1 py-2.5 border-2 border-amber-300 rounded-xl text-amber-700 font-semibold hover:bg-amber-50 flex items-center justify-center gap-2 text-sm">
               ✏️ Editar
             </button>
+            {sale.status === 'completed' && (sale.sale_items ?? []).length > 0 && (
+              <button
+                onClick={() => onReturn(sale)}
+                className="flex-1 py-2.5 border-2 border-purple-300 rounded-xl text-purple-700 font-semibold hover:bg-purple-50 flex items-center justify-center gap-2 text-sm"
+              >
+                ↩️ Devolver
+              </button>
+            )}
           </div>
           <button onClick={onClose} className="w-full py-2.5 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800">
             Cerrar
@@ -281,6 +294,15 @@ function SaleDetailModal({
 }
 
 // ─── Modal editar venta ──────────────────────────────────────────────
+interface CustomerResult {
+  id: string
+  full_name?: string
+  first_name: string
+  last_name?: string
+  phone?: string
+  document_number?: string
+}
+
 function EditSaleModal({
   sale,
   onClose,
@@ -298,6 +320,35 @@ function EditSaleModal({
   const [newAmount, setNewAmount] = useState('')
   const [newRef, setNewRef] = useState('')
   const [addingPayment, setAddingPayment] = useState(false)
+  // Cliente
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerResult | null>(
+    sale.customers ? { id: sale.customers.id, first_name: sale.customers.first_name, last_name: sale.customers.last_name, full_name: sale.customers.full_name, phone: sale.customers.phone } : null
+  )
+  const [customerSearch, setCustomerSearch] = useState('')
+  const [customerResults, setCustomerResults] = useState<CustomerResult[]>([])
+  const [searchingCustomer, setSearchingCustomer] = useState(false)
+
+  useEffect(() => {
+    if (!customerSearch.trim() || customerSearch.length < 2) { setCustomerResults([]); return }
+    const timer = setTimeout(async () => {
+      setSearchingCustomer(true)
+      const supabase = createClient()
+      const q = customerSearch.toLowerCase()
+      const { data } = await supabase
+        .from('customers')
+        .select('id, first_name, last_name, full_name, phone, document_number')
+        .or(`full_name.ilike.%${q}%,first_name.ilike.%${q}%,phone.ilike.%${q}%,document_number.ilike.%${q}%`)
+        .eq('is_active', true)
+        .limit(5)
+      setCustomerResults((data ?? []) as CustomerResult[])
+      setSearchingCustomer(false)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [customerSearch])
+
+  function getCustomerDisplayName(c: CustomerResult) {
+    return c.full_name || [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Sin nombre'
+  }
 
   const METHODS = [
     { key: 'cash',        label: '💵 Efectivo' },
@@ -318,7 +369,7 @@ function EditSaleModal({
     const supabase = createClient()
     const { error: err } = await supabase
       .from('sales')
-      .update({ status })
+      .update({ status, customer_id: selectedCustomer?.id ?? null })
       .eq('id', sale.id)
     if (err) { setError('Error al guardar: ' + err.message); setSaving(false); return }
     setSaving(false)
@@ -327,8 +378,19 @@ function EditSaleModal({
 
   async function handleDeletePayment(paymentId: string) {
     const supabase = createClient()
-    await supabase.from('sale_payments').delete().eq('id', paymentId)
-    setPayments(payments.filter(p => p.id !== paymentId))
+    const { error: err } = await supabase.from('sale_payments').delete().eq('id', paymentId)
+    if (!err) setPayments(payments.filter(p => p.id !== paymentId))
+    else setError('No se pudo eliminar el pago: ' + err.message)
+  }
+
+  async function handleUpdatePaymentMethod(paymentId: string, newMethod: string) {
+    const supabase = createClient()
+    const { error: err } = await supabase
+      .from('sale_payments')
+      .update({ payment_method: newMethod })
+      .eq('id', paymentId)
+    if (!err) setPayments(payments.map(p => p.id === paymentId ? { ...p, payment_method: newMethod } : p))
+    else setError('No se pudo actualizar: ' + err.message)
   }
 
   async function handleAddPayment() {
@@ -363,6 +425,49 @@ function EditSaleModal({
         <div className="p-5 space-y-5">
           {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-3 py-2 text-sm">{error}</div>}
 
+          {/* Cliente */}
+          <div>
+            <p className="text-sm font-semibold text-stone-700 mb-2">Cliente</p>
+            {selectedCustomer ? (
+              <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+                <span className="text-xl">👤</span>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-stone-800 text-sm">{getCustomerDisplayName(selectedCustomer)}</p>
+                  {selectedCustomer.phone && <p className="text-xs text-stone-500">{selectedCustomer.phone}</p>}
+                </div>
+                <button onClick={() => { setSelectedCustomer(null); setCustomerSearch('') }}
+                  className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50">
+                  ✕ Quitar
+                </button>
+              </div>
+            ) : (
+              <div className="relative">
+                <input
+                  type="text"
+                  value={customerSearch}
+                  onChange={e => setCustomerSearch(e.target.value)}
+                  placeholder="Buscar cliente por nombre o teléfono..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700 text-sm"
+                />
+                {searchingCustomer && <div className="absolute right-3 top-3 w-4 h-4 border-2 border-amber-700 border-t-transparent rounded-full animate-spin" />}
+                {customerResults.length > 0 && (
+                  <div className="absolute z-10 left-0 right-0 top-full mt-1 bg-white border border-stone-200 rounded-xl shadow-lg overflow-hidden">
+                    {customerResults.map(c => (
+                      <button key={c.id} onClick={() => { setSelectedCustomer(c); setCustomerSearch(''); setCustomerResults([]) }}
+                        className="w-full text-left px-3 py-2.5 hover:bg-amber-50 border-b border-stone-100 last:border-0 transition-colors">
+                        <p className="font-medium text-stone-800 text-sm">{getCustomerDisplayName(c)}</p>
+                        {c.phone && <p className="text-xs text-stone-400">{c.phone}</p>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {customerSearch.length >= 2 && !searchingCustomer && customerResults.length === 0 && (
+                  <p className="text-xs text-stone-400 mt-1 px-1">No se encontraron clientes</p>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Estado */}
           <div>
             <p className="text-sm font-semibold text-stone-700 mb-2">Estado de la venta</p>
@@ -392,16 +497,22 @@ function EditSaleModal({
             ) : (
               <div className="space-y-2">
                 {payments.map(p => (
-                  <div key={p.id} className="flex items-center justify-between bg-stone-50 rounded-xl px-3 py-2">
-                    <div>
-                      <p className="text-sm font-medium text-stone-700">{PAYMENT_LABELS[p.payment_method] ?? p.payment_method}</p>
-                      {p.reference && <p className="text-xs text-stone-400">Ref: {p.reference}</p>}
-                    </div>
-                    <div className="flex items-center gap-3">
+                  <div key={p.id} className="bg-stone-50 rounded-xl px-3 py-2 space-y-1.5">
+                    <div className="flex items-center justify-between">
                       <span className="font-bold text-stone-800">{formatCurrency(p.amount)}</span>
                       <button onClick={() => handleDeletePayment(p.id)}
-                        className="text-red-400 hover:text-red-600 text-lg leading-none">✕</button>
+                        className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50">
+                        🗑️ Eliminar
+                      </button>
                     </div>
+                    <select
+                      value={p.payment_method}
+                      onChange={e => handleUpdatePaymentMethod(p.id, e.target.value)}
+                      className="w-full px-3 py-1.5 rounded-lg border border-stone-200 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
+                    >
+                      {METHODS.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
+                    </select>
+                    {p.reference && <p className="text-xs text-stone-400">Ref: {p.reference}</p>}
                   </div>
                 ))}
               </div>
@@ -542,6 +653,249 @@ function AddPaymentModal({
   )
 }
 
+// ─── Modal devolución / nota crédito ────────────────────────────────
+function ReturnModal({
+  sale,
+  onClose,
+  onSaved,
+}: {
+  sale: Sale
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [returnItems, setReturnItems] = useState(
+    (sale.sale_items ?? []).map((item) => ({ item, qty: item.quantity, selected: false }))
+  )
+  const [refundMethod, setRefundMethod] = useState('cash')
+  const [reason, setReason] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const selectedItems = returnItems.filter((r) => r.selected && r.qty > 0)
+  const returnTotal = selectedItems.reduce((s, r) => s + r.item.unit_price * r.qty, 0)
+
+  const METHODS = [
+    { key: 'cash',        label: '💵 Efectivo' },
+    { key: 'nequi',       label: '📱 Nequi' },
+    { key: 'daviplata',   label: '📱 Daviplata' },
+    { key: 'transfer',    label: '🏦 Transferencia' },
+    { key: 'card_debit',  label: '💳 Débito' },
+  ]
+
+  async function handleReturn() {
+    if (selectedItems.length === 0) {
+      setError('Selecciona al menos un producto para devolver')
+      return
+    }
+    setSaving(true)
+    setError('')
+    const supabase = createClient()
+
+    try {
+      // 1. Crear venta de devolución
+      const returnNumber = 'DEV' + Date.now().toString().slice(-8)
+      const { data: returnSale, error: saleErr } = await supabase
+        .from('sales')
+        .insert({
+          sale_number: returnNumber,
+          customer_id: sale.customer_id ?? null,
+          subtotal: returnTotal,
+          discount_amount: 0,
+          tax_amount: 0,
+          total: returnTotal,
+          status: 'returned',
+          notes: `Devolución de ${sale.sale_number}${reason ? ': ' + reason : ''}`,
+        })
+        .select()
+        .single()
+
+      if (saleErr || !returnSale) throw saleErr ?? new Error('Error al crear devolución')
+
+      // 2. Crear sale_items de la devolución
+      await supabase.from('sale_items').insert(
+        selectedItems.map((r) => ({
+          sale_id: returnSale.id,
+          product_id: r.item.product_id ?? null,
+          product_name: r.item.product_name,
+          product_code: r.item.product_code ?? null,
+          quantity: r.qty,
+          unit_price: r.item.unit_price,
+          purchase_price: 0,
+          discount_percentage: 0,
+          discount_amount: 0,
+          tax_rate: 0,
+          tax_amount: 0,
+          subtotal: r.item.unit_price * r.qty,
+          total: r.item.unit_price * r.qty,
+        }))
+      )
+
+      // 3. Registrar el reembolso
+      await supabase.from('sale_payments').insert({
+        sale_id: returnSale.id,
+        payment_method: refundMethod,
+        amount: returnTotal,
+        change_amount: 0,
+      })
+
+      // 4. Ajustar inventario: devolver stock
+      for (const r of selectedItems) {
+        if (r.item.product_id) {
+          const { data: prod } = await supabase
+            .from('products')
+            .select('stock')
+            .eq('id', r.item.product_id)
+            .single()
+          if (prod) {
+            await supabase
+              .from('products')
+              .update({ stock: prod.stock + r.qty })
+              .eq('id', r.item.product_id)
+          }
+        }
+      }
+
+      onSaved()
+    } catch (err) {
+      console.error(err)
+      setError('Error al procesar la devolución. Intenta de nuevo.')
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="px-5 py-4 border-b flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-stone-800 text-lg">↩️ Devolución</h3>
+            <p className="text-stone-500 text-sm">{sale.sale_number}</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-stone-100 hover:bg-stone-200 flex items-center justify-center text-stone-500">✕</button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-3 py-2 text-sm">{error}</div>
+          )}
+
+          {/* Seleccionar ítems */}
+          <div>
+            <p className="text-sm font-semibold text-stone-700 mb-2">Selecciona los productos a devolver</p>
+            <div className="space-y-2">
+              {returnItems.map((r, idx) => (
+                <div
+                  key={idx}
+                  className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${r.selected ? 'border-amber-300 bg-amber-50' : 'border-stone-200'}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={r.selected}
+                    onChange={(e) =>
+                      setReturnItems((items) =>
+                        items.map((it, i) => i === idx ? { ...it, selected: e.target.checked } : it)
+                      )
+                    }
+                    className="w-4 h-4 accent-amber-700 flex-shrink-0"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-stone-800">{r.item.product_name}</p>
+                    <p className="text-xs text-stone-400">
+                      {formatCurrency(r.item.unit_price)} × cant. original: {r.item.quantity}
+                    </p>
+                  </div>
+                  {r.selected && (
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <button
+                        onClick={() =>
+                          setReturnItems((items) =>
+                            items.map((it, i) => i === idx ? { ...it, qty: Math.max(1, it.qty - 1) } : it)
+                          )
+                        }
+                        className="w-7 h-7 rounded-lg bg-stone-200 text-stone-700 hover:bg-stone-300 font-bold text-sm"
+                      >−</button>
+                      <span className="w-6 text-center text-sm font-bold text-stone-800">{r.qty}</span>
+                      <button
+                        onClick={() =>
+                          setReturnItems((items) =>
+                            items.map((it, i) => i === idx ? { ...it, qty: Math.min(it.item.quantity, it.qty + 1) } : it)
+                          )
+                        }
+                        className="w-7 h-7 rounded-lg bg-stone-200 text-stone-700 hover:bg-stone-300 font-bold text-sm"
+                      >+</button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Motivo */}
+          <div>
+            <label className="block text-sm font-medium text-stone-700 mb-1">Motivo (opcional)</label>
+            <input
+              type="text"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Ej: producto cobrado de más, cliente insatisfecho..."
+              className="w-full px-3 py-2 rounded-xl border border-stone-200 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700"
+            />
+          </div>
+
+          {/* Método de reembolso */}
+          {selectedItems.length > 0 && (
+            <div>
+              <p className="text-sm font-semibold text-stone-700 mb-2">Devolver dinero por</p>
+              <div className="grid grid-cols-3 gap-2">
+                {METHODS.map((m) => (
+                  <button
+                    key={m.key}
+                    onClick={() => setRefundMethod(m.key)}
+                    className={`py-2 rounded-xl text-xs font-medium border transition-all ${
+                      refundMethod === m.key
+                        ? 'bg-amber-700 text-white border-amber-700'
+                        : 'border-stone-200 text-stone-600 hover:border-amber-300'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Total a devolver */}
+          {selectedItems.length > 0 && (
+            <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 flex justify-between items-center">
+              <div>
+                <p className="text-xs text-purple-600 font-medium uppercase tracking-wide">Total a devolver</p>
+                <p className="text-2xl font-bold text-purple-700">{formatCurrency(returnTotal)}</p>
+                <p className="text-xs text-purple-400 mt-0.5">
+                  {selectedItems.length} producto(s) · {selectedItems.reduce((s, r) => s + r.qty, 0)} unid.
+                </p>
+              </div>
+              <span className="text-4xl">↩️</span>
+            </div>
+          )}
+        </div>
+
+        <div className="px-5 pb-5 flex gap-3">
+          <button onClick={onClose} className="flex-1 py-2.5 border border-stone-200 rounded-xl text-stone-600 hover:bg-stone-50 font-medium">
+            Cancelar
+          </button>
+          <button
+            onClick={handleReturn}
+            disabled={saving || selectedItems.length === 0}
+            className="flex-1 py-2.5 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 disabled:bg-stone-300 transition-colors"
+          >
+            {saving ? 'Procesando...' : '↩️ Confirmar devolución'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Página principal ────────────────────────────────────────────────
 export default function VentasPage() {
   const [sales, setSales] = useState<Sale[]>([])
@@ -553,6 +907,7 @@ export default function VentasPage() {
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null)
   const [payingSale, setPayingSale] = useState<Sale | null>(null)
   const [editingSale, setEditingSale] = useState<Sale | null>(null)
+  const [returningSale, setReturningSale] = useState<Sale | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -564,15 +919,23 @@ export default function VentasPage() {
         notes, created_at, customer_id,
         customers(id, first_name, last_name, full_name, phone),
         users(full_name),
-        sale_items(id, product_name, product_code, quantity, unit_price, discount_amount, tax_amount, total),
+        sale_items(id, product_id, product_name, product_code, quantity, unit_price, discount_amount, tax_amount, total),
         sale_payments(id, payment_method, amount, reference, received_amount, change_amount)
       `)
       .order('created_at', { ascending: false })
       .limit(200)
 
     if (statusFilter !== 'all') q = q.eq('status', statusFilter)
-    if (dateFrom) q = q.gte('created_at', dateFrom)
-    if (dateTo)   q = q.lte('created_at', dateTo + 'T23:59:59')
+    // ── Filtro por fecha usando zona horaria Colombia (UTC-5) ───────────────
+    // Sin esto, ventas hechas después de las 7 PM aparecen en el día siguiente (UTC)
+    if (dateFrom) {
+      const { from } = getColombiaDateUTCRange(dateFrom)
+      q = q.gte('created_at', from)
+    }
+    if (dateTo) {
+      const { to } = getColombiaDateUTCRange(dateTo)
+      q = q.lt('created_at', to)
+    }
 
     const { data } = await q
     const rows: Sale[] = (data ?? []).map((s: any) => {
@@ -719,6 +1082,10 @@ export default function VentasPage() {
             setSelectedSale(null)
             setEditingSale(sale)
           }}
+          onReturn={(sale) => {
+            setSelectedSale(null)
+            setReturningSale(sale)
+          }}
         />
       )}
 
@@ -741,6 +1108,18 @@ export default function VentasPage() {
           onClose={() => setPayingSale(null)}
           onSaved={() => {
             setPayingSale(null)
+            load()
+          }}
+        />
+      )}
+
+      {/* Modal devolución */}
+      {returningSale && (
+        <ReturnModal
+          sale={returningSale}
+          onClose={() => setReturningSale(null)}
+          onSaved={() => {
+            setReturningSale(null)
             load()
           }}
         />
