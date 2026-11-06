@@ -79,8 +79,12 @@ interface DailySummary {
 interface DailyEgresos {
   cash_purchases: number
   nequi_purchases: number
+  transfer_purchases: number
+  card_purchases: number
   cash_expenses: number
   nequi_expenses: number
+  transfer_expenses: number
+  card_expenses: number
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -346,7 +350,8 @@ export default function CajaPage() {
     sale_count: 0, sales: [],
   })
   const [egresos, setEgresos] = useState<DailyEgresos>({
-    cash_purchases: 0, nequi_purchases: 0, cash_expenses: 0, nequi_expenses: 0,
+    cash_purchases: 0, nequi_purchases: 0, transfer_purchases: 0, card_purchases: 0,
+    cash_expenses: 0, nequi_expenses: 0, transfer_expenses: 0, card_expenses: 0,
   })
   const [loading, setLoading] = useState(true)
   const [showAbrir, setShowAbrir] = useState(false)
@@ -425,35 +430,37 @@ export default function CajaPage() {
 
       // ── Egresos del día: compras y gastos pagados en efectivo/Nequi ──────────
       const egresosResult: DailyEgresos = {
-        cash_purchases: 0, nequi_purchases: 0,
-        cash_expenses: 0, nequi_expenses: 0,
+        cash_purchases: 0, nequi_purchases: 0, transfer_purchases: 0, card_purchases: 0,
+        cash_expenses: 0, nequi_expenses: 0, transfer_expenses: 0, card_expenses: 0,
       }
 
-      // Compras de hoy pagadas en efectivo o Nequi
+      // Compras de hoy por todos los métodos de pago
       const { data: purchasesData } = await supabase
         .from('purchases')
         .select('total, payment_method')
         .gte('created_at', todayFrom)
         .lt('created_at', todayTo)
         .eq('status', 'received')
-        .in('payment_method', ['cash', 'nequi'])
 
       for (const p of (purchasesData ?? [])) {
         if (p.payment_method === 'cash') egresosResult.cash_purchases += p.total
-        else if (p.payment_method === 'nequi') egresosResult.nequi_purchases += p.total
+        else if (['nequi', 'daviplata'].includes(p.payment_method)) egresosResult.nequi_purchases += p.total
+        else if (['transfer', 'bancolombia'].includes(p.payment_method)) egresosResult.transfer_purchases += p.total
+        else if (['card_debit', 'card_credit'].includes(p.payment_method)) egresosResult.card_purchases += p.total
       }
 
-      // Gastos de hoy pagados en efectivo o Nequi
+      // Gastos de hoy por todos los métodos de pago
       await Promise.resolve(
         supabase
           .from('expenses')
           .select('amount, payment_method')
           .eq('date', colombiaToday)
-          .in('payment_method', ['cash', 'nequi'])
       ).then(({ data: expData }) => {
         for (const e of (expData ?? [])) {
           if (e.payment_method === 'cash') egresosResult.cash_expenses += e.amount
-          else if (e.payment_method === 'nequi') egresosResult.nequi_expenses += e.amount
+          else if (['nequi', 'daviplata'].includes(e.payment_method)) egresosResult.nequi_expenses += e.amount
+          else if (['transfer', 'bancolombia'].includes(e.payment_method)) egresosResult.transfer_expenses += e.amount
+          else if (['card_debit', 'card_credit'].includes(e.payment_method)) egresosResult.card_expenses += e.amount
         }
       }).catch(() => {}) // Si la tabla expenses no existe, ignorar
 
@@ -708,8 +715,48 @@ CREATE POLICY "Authenticated users can manage cash_sessions"
             </div>
           </div>
 
+          {/* ── Balance por método de pago ──────────────────────────── */}
+          {session.status === 'open' && (() => {
+            const efectivoBal = session.opening_amount + summary.cash_sales
+              - egresos.cash_purchases - egresos.cash_expenses
+            const nequiBal = summary.nequi_sales
+              - egresos.nequi_purchases - egresos.nequi_expenses
+            const transferBal = summary.transfer_sales
+              - egresos.transfer_purchases - egresos.transfer_expenses
+            const cardBal = summary.card_sales - egresos.card_purchases - egresos.card_expenses
+
+            const rows = [
+              { icon: '💵', label: 'Efectivo en caja', balance: efectivoBal, detail: `${formatCurrency(session.opening_amount)} apertura + ${formatCurrency(summary.cash_sales)} ventas${(egresos.cash_purchases + egresos.cash_expenses) > 0 ? ` − ${formatCurrency(egresos.cash_purchases + egresos.cash_expenses)} egresos` : ''}` },
+              ...(summary.nequi_sales > 0 || nequiBal !== 0 ? [{ icon: '📱', label: 'Nequi / Daviplata', balance: nequiBal, detail: `${formatCurrency(summary.nequi_sales)} ventas${(egresos.nequi_purchases + egresos.nequi_expenses) > 0 ? ` − ${formatCurrency(egresos.nequi_purchases + egresos.nequi_expenses)} egresos` : ''}` }] : []),
+              ...(summary.transfer_sales > 0 || transferBal !== 0 ? [{ icon: '🏦', label: 'Bancolombia / Transferencia', balance: transferBal, detail: `${formatCurrency(summary.transfer_sales)} ventas${(egresos.transfer_purchases + egresos.transfer_expenses) > 0 ? ` − ${formatCurrency(egresos.transfer_purchases + egresos.transfer_expenses)} egresos` : ''}` }] : []),
+              ...(summary.card_sales > 0 || cardBal !== 0 ? [{ icon: '💳', label: 'Tarjeta (va al banco)', balance: cardBal, detail: `${formatCurrency(summary.card_sales)} ventas` }] : []),
+            ]
+
+            return (
+              <div className="bg-white border border-stone-200 rounded-2xl p-4">
+                <p className="text-xs text-stone-500 font-semibold uppercase tracking-wide mb-3">
+                  💼 ¿Cuánto tienes en cada medio?
+                </p>
+                <div className="space-y-3">
+                  {rows.map((row, i) => (
+                    <div key={i} className={`flex items-center justify-between ${i > 0 ? 'border-t border-stone-100 pt-3' : ''}`}>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-stone-700">{row.icon} {row.label}</p>
+                        <p className="text-xs text-stone-400">{row.detail}</p>
+                      </div>
+                      <p className={`text-lg font-bold flex-shrink-0 ml-4 ${row.balance < 0 ? 'text-red-600' : 'text-emerald-700'}`}>
+                        {formatCurrency(row.balance)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
+
           {/* Egresos del día */}
-          {(egresos.cash_purchases + egresos.nequi_purchases + egresos.cash_expenses + egresos.nequi_expenses) > 0 && (
+          {(egresos.cash_purchases + egresos.nequi_purchases + egresos.cash_expenses + egresos.nequi_expenses
+            + egresos.transfer_purchases + egresos.transfer_expenses + egresos.card_purchases + egresos.card_expenses) > 0 && (
             <div className="bg-white border border-stone-200 rounded-2xl p-4">
               <p className="text-xs text-stone-500 font-semibold uppercase tracking-wide mb-3">📤 Egresos del día</p>
               <div className="space-y-2 text-sm">
@@ -733,8 +780,32 @@ CREATE POLICY "Authenticated users can manage cash_sessions"
                 )}
                 {egresos.nequi_expenses > 0 && (
                   <div className="flex justify-between items-center">
-                    <span className="text-stone-500">📱 Gastos por Nequi</span>
+                    <span className="text-stone-500">📱 Gastos por Nequi/Daviplata</span>
                     <span className="font-semibold text-red-600">− {formatCurrency(egresos.nequi_expenses)}</span>
+                  </div>
+                )}
+                {egresos.transfer_purchases > 0 && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-stone-500">🏦 Compras por transferencia</span>
+                    <span className="font-semibold text-red-600">− {formatCurrency(egresos.transfer_purchases)}</span>
+                  </div>
+                )}
+                {egresos.transfer_expenses > 0 && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-stone-500">🏦 Gastos por transferencia</span>
+                    <span className="font-semibold text-red-600">− {formatCurrency(egresos.transfer_expenses)}</span>
+                  </div>
+                )}
+                {egresos.card_purchases > 0 && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-stone-500">💳 Compras con tarjeta</span>
+                    <span className="font-semibold text-red-600">− {formatCurrency(egresos.card_purchases)}</span>
+                  </div>
+                )}
+                {egresos.card_expenses > 0 && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-stone-500">💳 Gastos con tarjeta</span>
+                    <span className="font-semibold text-red-600">− {formatCurrency(egresos.card_expenses)}</span>
                   </div>
                 )}
                 <div className="flex justify-between items-center border-t border-stone-100 pt-2 font-bold">
@@ -742,7 +813,9 @@ CREATE POLICY "Authenticated users can manage cash_sessions"
                   <span className="text-red-600">
                     − {formatCurrency(
                       egresos.cash_purchases + egresos.nequi_purchases +
-                      egresos.cash_expenses + egresos.nequi_expenses
+                      egresos.transfer_purchases + egresos.card_purchases +
+                      egresos.cash_expenses + egresos.nequi_expenses +
+                      egresos.transfer_expenses + egresos.card_expenses
                     )}
                   </span>
                 </div>
