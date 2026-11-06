@@ -112,10 +112,123 @@ function PinModal({
 type MethodKey = 'cash' | 'nequi' | 'transfer' | 'card'
 
 const METHOD_INFO: Record<MethodKey, { label: string; icon: string; methods: string[] }> = {
-  cash:     { label: 'Efectivo',                icon: '💵', methods: ['cash'] },
-  nequi:    { label: 'Nequi / Daviplata',       icon: '📱', methods: ['nequi', 'daviplata'] },
+  cash:     { label: 'Efectivo',                    icon: '💵', methods: ['cash'] },
+  nequi:    { label: 'Nequi / Daviplata',           icon: '📱', methods: ['nequi', 'daviplata'] },
   transfer: { label: 'Bancolombia / Transferencia', icon: '🏦', methods: ['transfer', 'bancolombia'] },
-  card:     { label: 'Tarjeta',                 icon: '💳', methods: ['card', 'card_debit', 'card_credit'] },
+  card:     { label: 'Tarjeta',                     icon: '💳', methods: ['card', 'card_debit', 'card_credit'] },
+}
+
+// ─── Sub-modal: Editar compra ─────────────────────────────────────────────────
+interface CompraRow { id: string; supplier_name?: string; created_at: string; total: number; notes?: string; payment_method?: string }
+
+function EditCompraModal({ compra, onSave, onClose }: {
+  compra: CompraRow
+  onSave: (updated: CompraRow) => void
+  onClose: () => void
+}) {
+  const supabase = createClient()
+  const [form, setForm] = useState({
+    supplier_name: compra.supplier_name ?? '',
+    total:         String(compra.total),
+    payment_method: compra.payment_method ?? 'cash',
+    notes:         compra.notes ?? '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error,  setError]  = useState('')
+
+  const PM_OPTIONS = [
+    { value: 'cash',       label: '💵 Efectivo' },
+    { value: 'nequi',      label: '📱 Nequi' },
+    { value: 'daviplata',  label: '📱 Daviplata' },
+    { value: 'transfer',   label: '🏦 Transferencia' },
+    { value: 'bancolombia',label: '🏦 Bancolombia' },
+    { value: 'card',       label: '💳 Tarjeta' },
+  ]
+
+  async function handleSave() {
+    const totalNum = parseFloat(form.total.replace(/[^0-9.]/g, ''))
+    if (isNaN(totalNum) || totalNum <= 0) { setError('El total debe ser un número mayor a 0'); return }
+    setSaving(true); setError('')
+    const { error: err } = await supabase
+      .from('purchases')
+      .update({
+        supplier_name:  form.supplier_name || null,
+        total:          totalNum,
+        payment_method: form.payment_method,
+        notes:          form.notes || null,
+      })
+      .eq('id', compra.id)
+    setSaving(false)
+    if (err) { setError('Error al guardar: ' + err.message); return }
+    onSave({ ...compra, supplier_name: form.supplier_name || undefined, total: totalNum,
+             payment_method: form.payment_method, notes: form.notes || undefined })
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/70 z-[80] flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
+        <div className="px-5 py-4 border-b border-stone-100 flex items-center justify-between">
+          <h3 className="text-base font-bold text-stone-800">✏️ Editar compra</h3>
+          <button onClick={onClose} className="text-stone-400 hover:text-stone-600 text-2xl leading-none">×</button>
+        </div>
+        <div className="px-5 py-4 space-y-3">
+          <div>
+            <label className="block text-xs font-semibold text-stone-600 mb-1">Proveedor</label>
+            <input
+              className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+              value={form.supplier_name}
+              onChange={e => setForm(f => ({ ...f, supplier_name: e.target.value }))}
+              placeholder="Nombre del proveedor"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-stone-600 mb-1">Total ($)</label>
+            <input
+              className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+              value={form.total}
+              onChange={e => setForm(f => ({ ...f, total: e.target.value }))}
+              placeholder="0"
+              inputMode="decimal"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-stone-600 mb-1">Método de pago</label>
+            <select
+              className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+              value={form.payment_method}
+              onChange={e => setForm(f => ({ ...f, payment_method: e.target.value }))}
+            >
+              {PM_OPTIONS.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-stone-600 mb-1">Notas</label>
+            <input
+              className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+              value={form.notes}
+              onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+              placeholder="Descripción opcional"
+            />
+          </div>
+          {error && <p className="text-xs text-red-600">{error}</p>}
+        </div>
+        <div className="px-5 pb-4 flex gap-2">
+          <button onClick={onClose} className="flex-1 py-2 rounded-lg border border-stone-200 text-sm text-stone-600 hover:bg-stone-50">
+            Cancelar
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex-1 py-2 rounded-lg bg-amber-700 text-white text-sm font-semibold hover:bg-amber-800 disabled:opacity-50"
+          >
+            {saving ? 'Guardando…' : 'Guardar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function DetalleMetodoModal({ methodKey, onClose }: { methodKey: MethodKey; onClose: () => void }) {
@@ -124,49 +237,54 @@ function DetalleMetodoModal({ methodKey, onClose }: { methodKey: MethodKey; onCl
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<'ventas' | 'compras' | 'gastos'>('ventas')
   const [ventas,  setVentas]  = useState<{ id: string; sale_number: string; created_at: string; amount: number }[]>([])
-  const [compras, setCompras] = useState<{ id: string; supplier_name?: string; created_at: string; total: number; notes?: string }[]>([])
+  const [compras, setCompras] = useState<CompraRow[]>([])
   const [gastos,  setGastos]  = useState<{ id: string; description: string; date: string; amount: number; category: string }[]>([])
+  const [editCompra, setEditCompra] = useState<CompraRow | null>(null)
 
-  useEffect(() => {
-    async function load() {
-      setLoading(true)
+  async function loadData() {
+    setLoading(true)
 
-      // Ventas por este método
-      const { data: payments } = await supabase
-        .from('sale_payments')
-        .select('amount, sales!inner(id, sale_number, created_at, status)')
-        .in('payment_method', info.methods)
-        .eq('sales.status', 'completed')
+    // Ventas — filtro directo (sale_payments.payment_method es confiable)
+    const { data: payments } = await supabase
+      .from('sale_payments')
+      .select('amount, sales!inner(id, sale_number, created_at, status)')
+      .in('payment_method', info.methods)
+      .eq('sales.status', 'completed')
 
-      setVentas(
-        (payments ?? [])
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          .map((p: any) => ({ id: p.sales.id, sale_number: p.sales.sale_number, created_at: p.sales.created_at, amount: p.amount }))
-          .sort((a: any, b: any) => b.created_at.localeCompare(a.created_at))
-      )
+    setVentas(
+      (payments ?? [])
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .map((p: any) => ({ id: p.sales.id, sale_number: p.sales.sale_number, created_at: p.sales.created_at, amount: p.amount }))
+        .sort((a: any, b: any) => b.created_at.localeCompare(a.created_at))
+    )
 
-      // Compras por este método
-      const { data: purch } = await supabase
-        .from('purchases')
-        .select('id, supplier_name, created_at, total, notes')
-        .in('payment_method', info.methods)
-        .neq('status', 'cancelled')
-        .order('created_at', { ascending: false })
+    // Compras — traemos TODAS y filtramos en JS (igual que la vista acumulada)
+    // para garantizar que el resultado coincide con el total acumulado
+    const { data: allPurch } = await supabase
+      .from('purchases')
+      .select('id, supplier_name, created_at, total, notes, payment_method, status')
+      .neq('status', 'cancelled')
+      .order('created_at', { ascending: false })
 
-      setCompras(purch ?? [])
+    const filtered = (allPurch ?? []).filter(p =>
+      info.methods.map(m => m.toLowerCase()).includes((p.payment_method ?? '').toLowerCase())
+    )
+    setCompras(filtered)
 
-      // Gastos por este método
-      const { data: exp } = await supabase
-        .from('expenses')
-        .select('id, description, date, amount, category')
-        .in('payment_method', info.methods)
-        .order('date', { ascending: false })
+    // Gastos — igual, traer todo y filtrar en JS
+    const { data: allExp } = await supabase
+      .from('expenses')
+      .select('id, description, date, amount, category, payment_method')
+      .order('date', { ascending: false })
 
-      setGastos(exp ?? [])
-      setLoading(false)
-    }
-    load()
-  }, [methodKey]) // eslint-disable-line react-hooks/exhaustive-deps
+    const filteredExp = (allExp ?? []).filter(e =>
+      info.methods.map(m => m.toLowerCase()).includes((e.payment_method ?? '').toLowerCase())
+    )
+    setGastos(filteredExp)
+    setLoading(false)
+  }
+
+  useEffect(() => { loadData() }, [methodKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const totalVentas  = ventas.reduce((s, v) => s + v.amount, 0)
   const totalCompras = compras.reduce((s, c) => s + c.total, 0)
@@ -262,11 +380,20 @@ function DetalleMetodoModal({ methodKey, onClose }: { methodKey: MethodKey; onCl
                     ? <p className="text-stone-400 text-sm text-center py-8">Sin compras por este método</p>
                     : compras.map(c => (
                         <div key={c.id} className="flex items-center justify-between px-5 py-3 hover:bg-stone-50">
-                          <div>
+                          <div className="min-w-0 flex-1">
                             <p className="text-sm font-medium text-stone-800">{c.supplier_name ?? 'Sin proveedor'}</p>
                             <p className="text-xs text-stone-400">{formatColombiaTime(c.created_at)}{c.notes ? ` · ${c.notes}` : ''}</p>
                           </div>
-                          <p className="text-sm font-bold text-red-600">−{formatCurrency(c.total)}</p>
+                          <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+                            <p className="text-sm font-bold text-red-600">−{formatCurrency(c.total)}</p>
+                            <button
+                              onClick={() => setEditCompra(c)}
+                              className="text-stone-300 hover:text-amber-600 transition-colors p-1 rounded"
+                              title="Editar"
+                            >
+                              ✏️
+                            </button>
+                          </div>
                         </div>
                       ))
                   }
@@ -306,6 +433,18 @@ function DetalleMetodoModal({ methodKey, onClose }: { methodKey: MethodKey; onCl
           )}
         </div>
       </div>
+
+      {/* Sub-modal de edición */}
+      {editCompra && (
+        <EditCompraModal
+          compra={editCompra}
+          onClose={() => setEditCompra(null)}
+          onSave={(updated) => {
+            setCompras(prev => prev.map(c => c.id === updated.id ? updated : c))
+            setEditCompra(null)
+          }}
+        />
+      )}
     </div>
   )
 }
