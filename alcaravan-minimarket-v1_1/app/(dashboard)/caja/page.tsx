@@ -107,58 +107,66 @@ function PinModal({
   )
 }
 
-// ─── Modal: Detalle efectivo acumulado ───────────────────────────────────────
+// ─── Modal: Detalle por método de pago ───────────────────────────────────────
 
-function DetalleEfectivoModal({ onClose }: { onClose: () => void }) {
+type MethodKey = 'cash' | 'nequi' | 'transfer' | 'card'
+
+const METHOD_INFO: Record<MethodKey, { label: string; icon: string; methods: string[] }> = {
+  cash:     { label: 'Efectivo',                icon: '💵', methods: ['cash'] },
+  nequi:    { label: 'Nequi / Daviplata',       icon: '📱', methods: ['nequi', 'daviplata'] },
+  transfer: { label: 'Bancolombia / Transferencia', icon: '🏦', methods: ['transfer', 'bancolombia'] },
+  card:     { label: 'Tarjeta',                 icon: '💳', methods: ['card', 'card_debit', 'card_credit'] },
+}
+
+function DetalleMetodoModal({ methodKey, onClose }: { methodKey: MethodKey; onClose: () => void }) {
   const supabase = createClient()
+  const info = METHOD_INFO[methodKey]
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<'ventas' | 'compras' | 'gastos'>('ventas')
-  const [ventas, setVentas]   = useState<{ id: string; sale_number: string; created_at: string; amount: number }[]>([])
+  const [ventas,  setVentas]  = useState<{ id: string; sale_number: string; created_at: string; amount: number }[]>([])
   const [compras, setCompras] = useState<{ id: string; supplier_name?: string; created_at: string; total: number; notes?: string }[]>([])
-  const [gastos, setGastos]   = useState<{ id: string; description: string; date: string; amount: number; category: string }[]>([])
+  const [gastos,  setGastos]  = useState<{ id: string; description: string; date: string; amount: number; category: string }[]>([])
 
   useEffect(() => {
     async function load() {
       setLoading(true)
-      // Ventas con pagos en efectivo
+
+      // Ventas por este método
       const { data: payments } = await supabase
         .from('sale_payments')
         .select('amount, sales!inner(id, sale_number, created_at, status)')
-        .eq('payment_method', 'cash')
+        .in('payment_method', info.methods)
         .eq('sales.status', 'completed')
-        .order('sales(created_at)', { ascending: false })
 
       setVentas(
-        (payments ?? []).map((p: any) => ({
-          id: p.sales.id,
-          sale_number: p.sales.sale_number,
-          created_at: p.sales.created_at,
-          amount: p.amount,
-        }))
+        (payments ?? [])
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .map((p: any) => ({ id: p.sales.id, sale_number: p.sales.sale_number, created_at: p.sales.created_at, amount: p.amount }))
+          .sort((a: any, b: any) => b.created_at.localeCompare(a.created_at))
       )
 
-      // Compras pagadas en efectivo
+      // Compras por este método
       const { data: purch } = await supabase
         .from('purchases')
         .select('id, supplier_name, created_at, total, notes')
-        .eq('payment_method', 'cash')
+        .in('payment_method', info.methods)
         .neq('status', 'cancelled')
         .order('created_at', { ascending: false })
 
       setCompras(purch ?? [])
 
-      // Gastos pagados en efectivo
+      // Gastos por este método
       const { data: exp } = await supabase
         .from('expenses')
         .select('id, description, date, amount, category')
-        .eq('payment_method', 'cash')
+        .in('payment_method', info.methods)
         .order('date', { ascending: false })
 
       setGastos(exp ?? [])
       setLoading(false)
     }
     load()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [methodKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const totalVentas  = ventas.reduce((s, v) => s + v.amount, 0)
   const totalCompras = compras.reduce((s, c) => s + c.total, 0)
@@ -166,36 +174,37 @@ function DetalleEfectivoModal({ onClose }: { onClose: () => void }) {
   const neto = totalVentas - totalCompras - totalGastos
 
   const tabs = [
-    { key: 'ventas',  label: `💵 Ventas (${ventas.length})`,   color: 'text-emerald-700' },
-    { key: 'compras', label: `📦 Compras (${compras.length})`, color: 'text-red-600' },
-    { key: 'gastos',  label: `💸 Gastos (${gastos.length})`,   color: 'text-red-600' },
-  ] as const
+    { key: 'ventas'  as const, label: `Ventas (${ventas.length})` },
+    { key: 'compras' as const, label: `Compras (${compras.length})` },
+    { key: 'gastos'  as const, label: `Gastos (${gastos.length})` },
+  ]
 
   return (
     <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[90vh]">
+
         {/* Header */}
         <div className="px-5 py-4 border-b border-stone-100 flex items-center justify-between flex-shrink-0">
           <div>
-            <h2 className="text-lg font-bold text-stone-800">💵 Detalle efectivo acumulado</h2>
-            <p className="text-xs text-stone-400 mt-0.5">Todas las transacciones en efectivo</p>
+            <h2 className="text-lg font-bold text-stone-800">{info.icon} {info.label}</h2>
+            <p className="text-xs text-stone-400 mt-0.5">Todas las transacciones acumuladas</p>
           </div>
           <button onClick={onClose} className="text-stone-400 hover:text-stone-600 text-2xl leading-none">×</button>
         </div>
 
         {/* Resumen */}
-        <div className="grid grid-cols-3 gap-2 px-5 py-3 bg-stone-50 border-b border-stone-100 flex-shrink-0">
-          <div className="text-center">
-            <p className="text-[11px] text-stone-400 uppercase tracking-wide">Ventas</p>
-            <p className="text-sm font-bold text-emerald-700">{formatCurrency(totalVentas)}</p>
+        <div className="grid grid-cols-3 border-b border-stone-100 flex-shrink-0">
+          <div className="text-center px-3 py-3">
+            <p className="text-[10px] text-stone-400 uppercase tracking-wide">Ventas</p>
+            <p className="text-sm font-bold text-emerald-700 mt-0.5">+{formatCurrency(totalVentas)}</p>
           </div>
-          <div className="text-center border-x border-stone-200">
-            <p className="text-[11px] text-stone-400 uppercase tracking-wide">Egresos</p>
-            <p className="text-sm font-bold text-red-600">−{formatCurrency(totalCompras + totalGastos)}</p>
+          <div className="text-center px-3 py-3 border-x border-stone-100">
+            <p className="text-[10px] text-stone-400 uppercase tracking-wide">Egresos</p>
+            <p className="text-sm font-bold text-red-600 mt-0.5">−{formatCurrency(totalCompras + totalGastos)}</p>
           </div>
-          <div className="text-center">
-            <p className="text-[11px] text-stone-400 uppercase tracking-wide">Neto</p>
-            <p className={`text-sm font-bold ${neto >= 0 ? 'text-stone-800' : 'text-red-600'}`}>{formatCurrency(neto)}</p>
+          <div className="text-center px-3 py-3">
+            <p className="text-[10px] text-stone-400 uppercase tracking-wide">Neto</p>
+            <p className={`text-sm font-bold mt-0.5 ${neto >= 0 ? 'text-stone-800' : 'text-red-600'}`}>{formatCurrency(neto)}</p>
           </div>
         </div>
 
@@ -206,9 +215,7 @@ function DetalleEfectivoModal({ onClose }: { onClose: () => void }) {
               key={t.key}
               onClick={() => setTab(t.key)}
               className={`flex-1 py-2.5 text-xs font-semibold transition-colors ${
-                tab === t.key
-                  ? 'border-b-2 border-amber-700 text-amber-700'
-                  : 'text-stone-400 hover:text-stone-600'
+                tab === t.key ? 'border-b-2 border-amber-700 text-amber-700' : 'text-stone-400 hover:text-stone-600'
               }`}
             >
               {t.label}
@@ -224,70 +231,73 @@ function DetalleEfectivoModal({ onClose }: { onClose: () => void }) {
             </div>
           ) : (
             <>
+              {/* ── Tab Ventas ── */}
               {tab === 'ventas' && (
                 <div className="divide-y divide-stone-50">
-                  {ventas.length === 0 && (
-                    <p className="text-stone-400 text-sm text-center py-8">Sin ventas en efectivo</p>
-                  )}
-                  {ventas.map((v, i) => (
-                    <div key={`${v.id}-${i}`} className="flex items-center justify-between px-5 py-3 hover:bg-stone-50">
-                      <div>
-                        <p className="text-sm font-mono font-medium text-stone-800">{v.sale_number}</p>
-                        <p className="text-xs text-stone-400">{formatColombiaTime(v.created_at)}</p>
-                      </div>
-                      <p className="text-sm font-bold text-emerald-700">+{formatCurrency(v.amount)}</p>
-                    </div>
-                  ))}
+                  {ventas.length === 0
+                    ? <p className="text-stone-400 text-sm text-center py-8">Sin ventas por este método</p>
+                    : ventas.map((v, i) => (
+                        <div key={`${v.id}-${i}`} className="flex items-center justify-between px-5 py-3 hover:bg-stone-50">
+                          <div>
+                            <p className="text-sm font-mono font-medium text-stone-800">{v.sale_number}</p>
+                            <p className="text-xs text-stone-400">{formatColombiaTime(v.created_at)}</p>
+                          </div>
+                          <p className="text-sm font-bold text-emerald-700">+{formatCurrency(v.amount)}</p>
+                        </div>
+                      ))
+                  }
                   {ventas.length > 0 && (
-                    <div className="flex justify-between px-5 py-3 bg-emerald-50">
-                      <p className="text-sm font-bold text-stone-700">Total ventas</p>
-                      <p className="text-sm font-bold text-emerald-700">+{formatCurrency(totalVentas)}</p>
+                    <div className="flex justify-between px-5 py-3 bg-emerald-50 font-bold text-sm">
+                      <span className="text-stone-700">Total</span>
+                      <span className="text-emerald-700">+{formatCurrency(totalVentas)}</span>
                     </div>
                   )}
                 </div>
               )}
 
+              {/* ── Tab Compras ── */}
               {tab === 'compras' && (
                 <div className="divide-y divide-stone-50">
-                  {compras.length === 0 && (
-                    <p className="text-stone-400 text-sm text-center py-8">Sin compras en efectivo</p>
-                  )}
-                  {compras.map(c => (
-                    <div key={c.id} className="flex items-center justify-between px-5 py-3 hover:bg-stone-50">
-                      <div>
-                        <p className="text-sm font-medium text-stone-800">{c.supplier_name ?? 'Sin proveedor'}</p>
-                        <p className="text-xs text-stone-400">{formatColombiaTime(c.created_at)}{c.notes ? ` · ${c.notes}` : ''}</p>
-                      </div>
-                      <p className="text-sm font-bold text-red-600">−{formatCurrency(c.total)}</p>
-                    </div>
-                  ))}
+                  {compras.length === 0
+                    ? <p className="text-stone-400 text-sm text-center py-8">Sin compras por este método</p>
+                    : compras.map(c => (
+                        <div key={c.id} className="flex items-center justify-between px-5 py-3 hover:bg-stone-50">
+                          <div>
+                            <p className="text-sm font-medium text-stone-800">{c.supplier_name ?? 'Sin proveedor'}</p>
+                            <p className="text-xs text-stone-400">{formatColombiaTime(c.created_at)}{c.notes ? ` · ${c.notes}` : ''}</p>
+                          </div>
+                          <p className="text-sm font-bold text-red-600">−{formatCurrency(c.total)}</p>
+                        </div>
+                      ))
+                  }
                   {compras.length > 0 && (
-                    <div className="flex justify-between px-5 py-3 bg-red-50">
-                      <p className="text-sm font-bold text-stone-700">Total compras</p>
-                      <p className="text-sm font-bold text-red-600">−{formatCurrency(totalCompras)}</p>
+                    <div className="flex justify-between px-5 py-3 bg-red-50 font-bold text-sm">
+                      <span className="text-stone-700">Total</span>
+                      <span className="text-red-600">−{formatCurrency(totalCompras)}</span>
                     </div>
                   )}
                 </div>
               )}
 
+              {/* ── Tab Gastos ── */}
               {tab === 'gastos' && (
                 <div className="divide-y divide-stone-50">
-                  {gastos.length === 0 && (
-                    <p className="text-stone-400 text-sm text-center py-8">Sin gastos en efectivo</p>
-                  )}
-                  {gastos.map(g => (
-                    <div key={g.id} className="flex items-center justify-between px-5 py-3 hover:bg-stone-50">
-                      <div>
-                        <p className="text-sm font-medium text-stone-800">{g.description}</p>
-                        <p className="text-xs text-stone-400">{g.date} · {g.category}</p>
-                      </div>
-                      <p className="text-sm font-bold text-red-600">−{formatCurrency(g.amount)}</p>
-                    </div>
-                  ))}
+                  {gastos.length === 0
+                    ? <p className="text-stone-400 text-sm text-center py-8">Sin gastos por este método</p>
+                    : gastos.map(g => (
+                        <div key={g.id} className="flex items-center justify-between px-5 py-3 hover:bg-stone-50">
+                          <div>
+                            <p className="text-sm font-medium text-stone-800">{g.description}</p>
+                            <p className="text-xs text-stone-400">{g.date} · {g.category}</p>
+                          </div>
+                          <p className="text-sm font-bold text-red-600">−{formatCurrency(g.amount)}</p>
+                        </div>
+                      ))
+                  }
                   {gastos.length > 0 && (
-                    <div className="flex justify-between px-5 py-3 bg-red-50">
-                      <p className="text-sm font-bold text-stone-700">Total gastos</p>
-                      <p className="text-sm font-bold text-red-600">−{formatCurrency(totalGastos)}</p>
+                    <div className="flex justify-between px-5 py-3 bg-red-50 font-bold text-sm">
+                      <span className="text-stone-700">Total</span>
+                      <span className="text-red-600">−{formatCurrency(totalGastos)}</span>
                     </div>
                   )}
                 </div>
@@ -620,7 +630,7 @@ export default function CajaPage() {
   })
   const [showCumulativeBalance, setShowCumulativeBalance] = useState(false)
   const [showPinBalance, setShowPinBalance] = useState(false)
-  const [showCashDetail, setShowCashDetail] = useState(false)
+  const [showDetailMethod, setShowDetailMethod] = useState<MethodKey | null>(null)
   const [allSessions, setAllSessions] = useState<CashSession[]>([])
 
   const colombiaToday = getColombiaDate()
@@ -1037,17 +1047,17 @@ CREATE POLICY "Authenticated users can manage cash_sessions"
               const transferTotal = cumulative.transfer - cumulative.transfer_out
               const cardTotal     = cumulative.card - cumulative.card_out
 
-              const rows = [
-                { icon: '💵', label: 'Efectivo', value: efectivoTotal,
+              const rows: { icon: string; label: string; value: number; sub: string; methodKey: MethodKey }[] = [
+                { icon: '💵', label: 'Efectivo', value: efectivoTotal, methodKey: 'cash',
                   sub: [
                     `+${formatCurrency(cumulative.cash)} ventas`,
                     cumulative.cash_purchases > 0 ? `−${formatCurrency(cumulative.cash_purchases)} compras` : '',
                     cumulative.cash_expenses  > 0 ? `−${formatCurrency(cumulative.cash_expenses)} gastos`   : '',
                   ].filter(Boolean).join(' · ')
                 },
-                ...(cumulative.nequi > 0 || nequiTotal !== 0 ? [{ icon: '📱', label: 'Nequi / Daviplata', value: nequiTotal, sub: `${formatCurrency(cumulative.nequi)} ventas · −${formatCurrency(cumulative.nequi_out)} egresos` }] : []),
-                ...(cumulative.transfer > 0 || transferTotal !== 0 ? [{ icon: '🏦', label: 'Bancolombia / Transferencia', value: transferTotal, sub: `${formatCurrency(cumulative.transfer)} ventas · −${formatCurrency(cumulative.transfer_out)} egresos` }] : []),
-                ...(cumulative.card > 0 || cardTotal !== 0 ? [{ icon: '💳', label: 'Tarjeta (en banco)', value: cardTotal, sub: `${formatCurrency(cumulative.card)} ventas` }] : []),
+                ...(cumulative.nequi > 0 || nequiTotal !== 0 ? [{ icon: '📱', label: 'Nequi / Daviplata', value: nequiTotal, methodKey: 'nequi' as MethodKey, sub: `${formatCurrency(cumulative.nequi)} ventas · −${formatCurrency(cumulative.nequi_out)} egresos` }] : []),
+                ...(cumulative.transfer > 0 || transferTotal !== 0 ? [{ icon: '🏦', label: 'Bancolombia / Transferencia', value: transferTotal, methodKey: 'transfer' as MethodKey, sub: `${formatCurrency(cumulative.transfer)} ventas · −${formatCurrency(cumulative.transfer_out)} egresos` }] : []),
+                ...(cumulative.card > 0 || cardTotal !== 0 ? [{ icon: '💳', label: 'Tarjeta (en banco)', value: cardTotal, methodKey: 'card' as MethodKey, sub: `${formatCurrency(cumulative.card)} ventas` }] : []),
               ]
 
               return (
@@ -1075,14 +1085,12 @@ CREATE POLICY "Authenticated users can manage cash_sessions"
                             {formatCurrency(row.value)}
                           </p>
                         </div>
-                        {i === 0 && (
-                          <button
-                            onClick={() => setShowCashDetail(true)}
-                            className="mt-1.5 text-[11px] text-amber-400 hover:text-amber-300 transition-colors underline underline-offset-2"
-                          >
-                            Ver detalle →
-                          </button>
-                        )}
+                        <button
+                          onClick={() => setShowDetailMethod(row.methodKey)}
+                          className="mt-1.5 text-[11px] text-amber-400 hover:text-amber-300 transition-colors underline underline-offset-2"
+                        >
+                          Ver detalle →
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -1437,8 +1445,8 @@ CREATE POLICY "Authenticated users can manage cash_sessions"
         />
       )}
 
-      {showCashDetail && (
-        <DetalleEfectivoModal onClose={() => setShowCashDetail(false)} />
+      {showDetailMethod && (
+        <DetalleMetodoModal methodKey={showDetailMethod} onClose={() => setShowDetailMethod(null)} />
       )}
     </div>
   )
