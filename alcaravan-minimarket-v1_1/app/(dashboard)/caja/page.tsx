@@ -423,7 +423,7 @@ export default function CajaPage() {
   const [cumulative, setCumulative] = useState({
     cash: 0, nequi: 0, transfer: 0, card: 0,
     cash_out: 0, nequi_out: 0, transfer_out: 0, card_out: 0,
-    total_openings: 0,
+    initial_capital: 0, // solo la apertura del PRIMER día
   })
   const [showCumulativeBalance, setShowCumulativeBalance] = useState(false)
   const [showPinBalance, setShowPinBalance] = useState(false)
@@ -577,18 +577,23 @@ export default function CajaPage() {
         else if (['card_debit', 'card_credit'].includes(e.payment_method)) cumCardOut += e.amount
       }
 
-      // Suma de todas las aperturas de caja (efectivo inicial histórico)
-      const { data: allSessions } = await supabase
+      // Solo la apertura del PRIMER día (capital inicial real).
+      // No se suman todas las aperturas porque cada día se abre con el mismo
+      // efectivo del día anterior — sumarlas duplicaría el dinero.
+      const { data: firstSession } = await supabase
         .from('cash_sessions')
         .select('opening_amount')
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle()
 
-      const totalOpenings = (allSessions ?? []).reduce((s, r) => s + (r.opening_amount ?? 0), 0)
+      const initialCapital = firstSession?.opening_amount ?? 0
 
       setCumulative({
         cash: cumCash, nequi: cumNequi, transfer: cumTransfer, card: cumCard,
         cash_out: cumCashOut, nequi_out: cumNequiOut,
         transfer_out: cumTransferOut, card_out: cumCardOut,
-        total_openings: totalOpenings,
+        initial_capital: initialCapital,
       })
 
     } catch (err) {
@@ -827,13 +832,13 @@ CREATE POLICY "Authenticated users can manage cash_sessions"
             </div>
           ) : (
             (() => {
-              const efectivoTotal = cumulative.total_openings + cumulative.cash - cumulative.cash_out
+              const efectivoTotal = cumulative.initial_capital + cumulative.cash - cumulative.cash_out
               const nequiTotal    = cumulative.nequi - cumulative.nequi_out
               const transferTotal = cumulative.transfer - cumulative.transfer_out
               const cardTotal     = cumulative.card - cumulative.card_out
 
               const rows = [
-                { icon: '💵', label: 'Efectivo en caja', value: efectivoTotal, sub: `${formatCurrency(cumulative.cash)} ventas · ${formatCurrency(cumulative.total_openings)} aperturas · −${formatCurrency(cumulative.cash_out)} egresos` },
+                { icon: '💵', label: 'Efectivo en caja', value: efectivoTotal, sub: `${formatCurrency(cumulative.initial_capital)} capital inicial · +${formatCurrency(cumulative.cash)} ventas · −${formatCurrency(cumulative.cash_out)} egresos` },
                 ...(cumulative.nequi > 0 || nequiTotal !== 0 ? [{ icon: '📱', label: 'Nequi / Daviplata', value: nequiTotal, sub: `${formatCurrency(cumulative.nequi)} ventas · −${formatCurrency(cumulative.nequi_out)} egresos` }] : []),
                 ...(cumulative.transfer > 0 || transferTotal !== 0 ? [{ icon: '🏦', label: 'Bancolombia / Transferencia', value: transferTotal, sub: `${formatCurrency(cumulative.transfer)} ventas · −${formatCurrency(cumulative.transfer_out)} egresos` }] : []),
                 ...(cumulative.card > 0 || cardTotal !== 0 ? [{ icon: '💳', label: 'Tarjeta (en banco)', value: cardTotal, sub: `${formatCurrency(cumulative.card)} ventas` }] : []),
