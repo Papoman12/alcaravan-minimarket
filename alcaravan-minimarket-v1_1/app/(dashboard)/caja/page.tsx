@@ -423,6 +423,7 @@ export default function CajaPage() {
   const [cumulative, setCumulative] = useState({
     cash: 0, nequi: 0, transfer: 0, card: 0,
     cash_out: 0, nequi_out: 0, transfer_out: 0, card_out: 0,
+    cash_purchases: 0, cash_expenses: 0,
   })
   const [showCumulativeBalance, setShowCumulativeBalance] = useState(false)
   const [showPinBalance, setShowPinBalance] = useState(false)
@@ -559,11 +560,12 @@ export default function CajaPage() {
         .neq('status', 'cancelled')
 
       let cumCashOut = 0, cumNequiOut = 0, cumTransferOut = 0, cumCardOut = 0
+      let cumCashPurchases = 0 // para desglose en UI
       for (const p of (allPurchases ?? [])) {
-        if (p.payment_method === 'cash') cumCashOut += p.total
+        if (p.payment_method === 'cash') { cumCashOut += p.total; cumCashPurchases += p.total }
         else if (['nequi', 'daviplata'].includes(p.payment_method)) cumNequiOut += p.total
         else if (['transfer', 'bancolombia'].includes(p.payment_method)) cumTransferOut += p.total
-        else if (['card_debit', 'card_credit'].includes(p.payment_method)) cumCardOut += p.total
+        else if (['card', 'card_debit', 'card_credit'].includes(p.payment_method)) cumCardOut += p.total
       }
 
       // Gastos históricos — manejamos el error explícitamente
@@ -571,22 +573,22 @@ export default function CajaPage() {
         .from('expenses')
         .select('payment_method, amount')
 
+      let cumCashExpenses = 0 // para desglose en UI
       if (!expErr) {
         for (const e of (allExpenses ?? [])) {
-          if (e.payment_method === 'cash') cumCashOut += e.amount
+          if (e.payment_method === 'cash') { cumCashOut += e.amount; cumCashExpenses += e.amount }
           else if (['nequi', 'daviplata'].includes(e.payment_method)) cumNequiOut += e.amount
           else if (['transfer', 'bancolombia'].includes(e.payment_method)) cumTransferOut += e.amount
           else if (['card', 'card_debit', 'card_credit'].includes(e.payment_method)) cumCardOut += e.amount
         }
       }
 
-      // No se suma ninguna apertura porque la apertura de cada día
-      // ya es el dinero acumulado de ventas anteriores — sumarlo sería
-      // contarlo dos veces. El balance es simplemente ventas − egresos.
       setCumulative({
         cash: cumCash, nequi: cumNequi, transfer: cumTransfer, card: cumCard,
         cash_out: cumCashOut, nequi_out: cumNequiOut,
         transfer_out: cumTransferOut, card_out: cumCardOut,
+        cash_purchases: cumCashPurchases,
+        cash_expenses: cumCashExpenses,
       })
 
       // ── Historial de sesiones de caja ──────────────────────────────────────
@@ -834,13 +836,21 @@ CREATE POLICY "Authenticated users can manage cash_sessions"
             </div>
           ) : (
             (() => {
+              // Todas las ventas en efectivo desde el inicio
+              // menos todos los gastos y compras pagados en efectivo
               const efectivoTotal = cumulative.cash - cumulative.cash_out
               const nequiTotal    = cumulative.nequi - cumulative.nequi_out
               const transferTotal = cumulative.transfer - cumulative.transfer_out
               const cardTotal     = cumulative.card - cumulative.card_out
 
               const rows = [
-                { icon: '💵', label: 'Efectivo en caja', value: efectivoTotal, sub: `${formatCurrency(cumulative.cash)} ventas · −${formatCurrency(cumulative.cash_out)} egresos` },
+                { icon: '💵', label: 'Efectivo', value: efectivoTotal,
+                  sub: [
+                    `+${formatCurrency(cumulative.cash)} ventas`,
+                    cumulative.cash_purchases > 0 ? `−${formatCurrency(cumulative.cash_purchases)} compras` : '',
+                    cumulative.cash_expenses  > 0 ? `−${formatCurrency(cumulative.cash_expenses)} gastos`   : '',
+                  ].filter(Boolean).join(' · ')
+                },
                 ...(cumulative.nequi > 0 || nequiTotal !== 0 ? [{ icon: '📱', label: 'Nequi / Daviplata', value: nequiTotal, sub: `${formatCurrency(cumulative.nequi)} ventas · −${formatCurrency(cumulative.nequi_out)} egresos` }] : []),
                 ...(cumulative.transfer > 0 || transferTotal !== 0 ? [{ icon: '🏦', label: 'Bancolombia / Transferencia', value: transferTotal, sub: `${formatCurrency(cumulative.transfer)} ventas · −${formatCurrency(cumulative.transfer_out)} egresos` }] : []),
                 ...(cumulative.card > 0 || cardTotal !== 0 ? [{ icon: '💳', label: 'Tarjeta (en banco)', value: cardTotal, sub: `${formatCurrency(cumulative.card)} ventas` }] : []),
