@@ -107,6 +107,199 @@ function PinModal({
   )
 }
 
+// ─── Modal: Detalle efectivo acumulado ───────────────────────────────────────
+
+function DetalleEfectivoModal({ onClose }: { onClose: () => void }) {
+  const supabase = createClient()
+  const [loading, setLoading] = useState(true)
+  const [tab, setTab] = useState<'ventas' | 'compras' | 'gastos'>('ventas')
+  const [ventas, setVentas]   = useState<{ id: string; sale_number: string; created_at: string; amount: number }[]>([])
+  const [compras, setCompras] = useState<{ id: string; supplier_name?: string; created_at: string; total: number; notes?: string }[]>([])
+  const [gastos, setGastos]   = useState<{ id: string; description: string; date: string; amount: number; category: string }[]>([])
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true)
+      // Ventas con pagos en efectivo
+      const { data: payments } = await supabase
+        .from('sale_payments')
+        .select('amount, sales!inner(id, sale_number, created_at, status)')
+        .eq('payment_method', 'cash')
+        .eq('sales.status', 'completed')
+        .order('sales(created_at)', { ascending: false })
+
+      setVentas(
+        (payments ?? []).map((p: any) => ({
+          id: p.sales.id,
+          sale_number: p.sales.sale_number,
+          created_at: p.sales.created_at,
+          amount: p.amount,
+        }))
+      )
+
+      // Compras pagadas en efectivo
+      const { data: purch } = await supabase
+        .from('purchases')
+        .select('id, supplier_name, created_at, total, notes')
+        .eq('payment_method', 'cash')
+        .neq('status', 'cancelled')
+        .order('created_at', { ascending: false })
+
+      setCompras(purch ?? [])
+
+      // Gastos pagados en efectivo
+      const { data: exp } = await supabase
+        .from('expenses')
+        .select('id, description, date, amount, category')
+        .eq('payment_method', 'cash')
+        .order('date', { ascending: false })
+
+      setGastos(exp ?? [])
+      setLoading(false)
+    }
+    load()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const totalVentas  = ventas.reduce((s, v) => s + v.amount, 0)
+  const totalCompras = compras.reduce((s, c) => s + c.total, 0)
+  const totalGastos  = gastos.reduce((s, g) => s + g.amount, 0)
+  const neto = totalVentas - totalCompras - totalGastos
+
+  const tabs = [
+    { key: 'ventas',  label: `💵 Ventas (${ventas.length})`,   color: 'text-emerald-700' },
+    { key: 'compras', label: `📦 Compras (${compras.length})`, color: 'text-red-600' },
+    { key: 'gastos',  label: `💸 Gastos (${gastos.length})`,   color: 'text-red-600' },
+  ] as const
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[90vh]">
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-stone-100 flex items-center justify-between flex-shrink-0">
+          <div>
+            <h2 className="text-lg font-bold text-stone-800">💵 Detalle efectivo acumulado</h2>
+            <p className="text-xs text-stone-400 mt-0.5">Todas las transacciones en efectivo</p>
+          </div>
+          <button onClick={onClose} className="text-stone-400 hover:text-stone-600 text-2xl leading-none">×</button>
+        </div>
+
+        {/* Resumen */}
+        <div className="grid grid-cols-3 gap-2 px-5 py-3 bg-stone-50 border-b border-stone-100 flex-shrink-0">
+          <div className="text-center">
+            <p className="text-[11px] text-stone-400 uppercase tracking-wide">Ventas</p>
+            <p className="text-sm font-bold text-emerald-700">{formatCurrency(totalVentas)}</p>
+          </div>
+          <div className="text-center border-x border-stone-200">
+            <p className="text-[11px] text-stone-400 uppercase tracking-wide">Egresos</p>
+            <p className="text-sm font-bold text-red-600">−{formatCurrency(totalCompras + totalGastos)}</p>
+          </div>
+          <div className="text-center">
+            <p className="text-[11px] text-stone-400 uppercase tracking-wide">Neto</p>
+            <p className={`text-sm font-bold ${neto >= 0 ? 'text-stone-800' : 'text-red-600'}`}>{formatCurrency(neto)}</p>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex border-b border-stone-100 flex-shrink-0">
+          {tabs.map(t => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`flex-1 py-2.5 text-xs font-semibold transition-colors ${
+                tab === t.key
+                  ? 'border-b-2 border-amber-700 text-amber-700'
+                  : 'text-stone-400 hover:text-stone-600'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Contenido */}
+        <div className="overflow-y-auto flex-1">
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="w-7 h-7 border-4 border-amber-700/30 border-t-amber-700 rounded-full animate-spin" />
+            </div>
+          ) : (
+            <>
+              {tab === 'ventas' && (
+                <div className="divide-y divide-stone-50">
+                  {ventas.length === 0 && (
+                    <p className="text-stone-400 text-sm text-center py-8">Sin ventas en efectivo</p>
+                  )}
+                  {ventas.map((v, i) => (
+                    <div key={`${v.id}-${i}`} className="flex items-center justify-between px-5 py-3 hover:bg-stone-50">
+                      <div>
+                        <p className="text-sm font-mono font-medium text-stone-800">{v.sale_number}</p>
+                        <p className="text-xs text-stone-400">{formatColombiaTime(v.created_at)}</p>
+                      </div>
+                      <p className="text-sm font-bold text-emerald-700">+{formatCurrency(v.amount)}</p>
+                    </div>
+                  ))}
+                  {ventas.length > 0 && (
+                    <div className="flex justify-between px-5 py-3 bg-emerald-50">
+                      <p className="text-sm font-bold text-stone-700">Total ventas</p>
+                      <p className="text-sm font-bold text-emerald-700">+{formatCurrency(totalVentas)}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {tab === 'compras' && (
+                <div className="divide-y divide-stone-50">
+                  {compras.length === 0 && (
+                    <p className="text-stone-400 text-sm text-center py-8">Sin compras en efectivo</p>
+                  )}
+                  {compras.map(c => (
+                    <div key={c.id} className="flex items-center justify-between px-5 py-3 hover:bg-stone-50">
+                      <div>
+                        <p className="text-sm font-medium text-stone-800">{c.supplier_name ?? 'Sin proveedor'}</p>
+                        <p className="text-xs text-stone-400">{formatColombiaTime(c.created_at)}{c.notes ? ` · ${c.notes}` : ''}</p>
+                      </div>
+                      <p className="text-sm font-bold text-red-600">−{formatCurrency(c.total)}</p>
+                    </div>
+                  ))}
+                  {compras.length > 0 && (
+                    <div className="flex justify-between px-5 py-3 bg-red-50">
+                      <p className="text-sm font-bold text-stone-700">Total compras</p>
+                      <p className="text-sm font-bold text-red-600">−{formatCurrency(totalCompras)}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {tab === 'gastos' && (
+                <div className="divide-y divide-stone-50">
+                  {gastos.length === 0 && (
+                    <p className="text-stone-400 text-sm text-center py-8">Sin gastos en efectivo</p>
+                  )}
+                  {gastos.map(g => (
+                    <div key={g.id} className="flex items-center justify-between px-5 py-3 hover:bg-stone-50">
+                      <div>
+                        <p className="text-sm font-medium text-stone-800">{g.description}</p>
+                        <p className="text-xs text-stone-400">{g.date} · {g.category}</p>
+                      </div>
+                      <p className="text-sm font-bold text-red-600">−{formatCurrency(g.amount)}</p>
+                    </div>
+                  ))}
+                  {gastos.length > 0 && (
+                    <div className="flex justify-between px-5 py-3 bg-red-50">
+                      <p className="text-sm font-bold text-stone-700">Total gastos</p>
+                      <p className="text-sm font-bold text-red-600">−{formatCurrency(totalGastos)}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
 interface CashSession {
@@ -427,6 +620,7 @@ export default function CajaPage() {
   })
   const [showCumulativeBalance, setShowCumulativeBalance] = useState(false)
   const [showPinBalance, setShowPinBalance] = useState(false)
+  const [showCashDetail, setShowCashDetail] = useState(false)
   const [allSessions, setAllSessions] = useState<CashSession[]>([])
 
   const colombiaToday = getColombiaDate()
@@ -871,14 +1065,24 @@ CREATE POLICY "Authenticated users can manage cash_sessions"
                   </div>
                   <div className="space-y-3">
                     {rows.map((row, i) => (
-                      <div key={i} className={`flex items-center justify-between ${i > 0 ? 'border-t border-stone-700 pt-3' : ''}`}>
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-white">{row.icon} {row.label}</p>
-                          <p className="text-[11px] text-stone-400 mt-0.5">{row.sub}</p>
+                      <div key={i} className={`${i > 0 ? 'border-t border-stone-700 pt-3' : ''}`}>
+                        <div className="flex items-center justify-between">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-white">{row.icon} {row.label}</p>
+                            <p className="text-[11px] text-stone-400 mt-0.5">{row.sub}</p>
+                          </div>
+                          <p className={`text-xl font-bold flex-shrink-0 ml-4 ${row.value < 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                            {formatCurrency(row.value)}
+                          </p>
                         </div>
-                        <p className={`text-xl font-bold flex-shrink-0 ml-4 ${row.value < 0 ? 'text-red-400' : 'text-emerald-400'}`}>
-                          {formatCurrency(row.value)}
-                        </p>
+                        {i === 0 && (
+                          <button
+                            onClick={() => setShowCashDetail(true)}
+                            className="mt-1.5 text-[11px] text-amber-400 hover:text-amber-300 transition-colors underline underline-offset-2"
+                          >
+                            Ver detalle →
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -1231,6 +1435,10 @@ CREATE POLICY "Authenticated users can manage cash_sessions"
           }}
           onClose={() => setShowPinBalance(false)}
         />
+      )}
+
+      {showCashDetail && (
+        <DetalleEfectivoModal onClose={() => setShowCashDetail(false)} />
       )}
     </div>
   )
