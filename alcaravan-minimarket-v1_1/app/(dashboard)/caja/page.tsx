@@ -40,9 +40,72 @@ import {
 } from '@/lib/colombia-time'
 
 // ─── PIN de administrador ─────────────────────────────────────────────────────
-// Cambia este valor por el PIN que quieras usar en tu negocio.
-// Solo quien conozca este PIN puede corregir el monto de apertura.
-const ADMIN_PIN = '1234'
+// PIN universal para todas las acciones de administrador.
+const ADMIN_PIN = '0915'
+
+// ─── Modal: PIN de administrador ─────────────────────────────────────────────
+
+function PinModal({
+  title = 'Acción restringida',
+  onSuccess,
+  onClose,
+}: {
+  title?: string
+  onSuccess: () => void
+  onClose: () => void
+}) {
+  const [pin, setPin] = useState('')
+  const [error, setError] = useState('')
+
+  function handleVerify() {
+    if (pin === ADMIN_PIN) {
+      onSuccess()
+    } else {
+      setError('PIN incorrecto')
+      setPin('')
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs">
+        <div className="px-6 py-5 border-b border-stone-100">
+          <h2 className="text-lg font-bold text-stone-800">🔐 {title}</h2>
+          <p className="text-stone-500 text-sm mt-1">Solo el administrador puede continuar.</p>
+        </div>
+        <div className="p-6 space-y-4">
+          <input
+            type="password"
+            inputMode="numeric"
+            value={pin}
+            onChange={(e) => { setPin(e.target.value); setError('') }}
+            onKeyDown={(e) => e.key === 'Enter' && handleVerify()}
+            placeholder="Ingresa el PIN"
+            autoFocus
+            className="w-full px-4 py-3 rounded-xl border border-stone-200 text-center text-2xl font-bold tracking-widest text-stone-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
+          />
+          {error && (
+            <p className="text-red-600 text-sm text-center font-medium">{error}</p>
+          )}
+        </div>
+        <div className="px-6 pb-6 flex gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 py-3 rounded-xl border border-stone-200 text-stone-600 font-medium hover:bg-stone-50 transition-colors"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleVerify}
+            className="flex-1 py-3 rounded-xl bg-purple-600 text-white font-bold hover:bg-purple-700 transition-colors"
+          >
+            Confirmar
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -357,6 +420,13 @@ export default function CajaPage() {
   const [showAbrir, setShowAbrir] = useState(false)
   const [showCerrar, setShowCerrar] = useState(false)
   const [error, setError] = useState('')
+  const [cumulative, setCumulative] = useState({
+    cash: 0, nequi: 0, transfer: 0, card: 0,
+    cash_out: 0, nequi_out: 0, transfer_out: 0, card_out: 0,
+    total_openings: 0,
+  })
+  const [showCumulativeBalance, setShowCumulativeBalance] = useState(false)
+  const [showPinBalance, setShowPinBalance] = useState(false)
 
   const colombiaToday = getColombiaDate()
   const { from: todayFrom, to: todayTo } = getColombiaDateUTCRange(colombiaToday)
@@ -465,6 +535,62 @@ export default function CajaPage() {
       }).catch(() => {}) // Si la tabla expenses no existe, ignorar
 
       setEgresos(egresosResult)
+
+      // ── Balance acumulado histórico (desde el inicio) ─────────────────────
+      // Ventas históricas por método de pago
+      const { data: allPayments } = await supabase
+        .from('sale_payments')
+        .select('payment_method, amount, sales!inner(status)')
+        .eq('sales.status', 'completed')
+
+      let cumCash = 0, cumNequi = 0, cumTransfer = 0, cumCard = 0
+      for (const p of (allPayments ?? [])) {
+        if (p.payment_method === 'cash') cumCash += p.amount
+        else if (['nequi', 'daviplata'].includes(p.payment_method)) cumNequi += p.amount
+        else if (['transfer', 'bancolombia'].includes(p.payment_method)) cumTransfer += p.amount
+        else if (['card_debit', 'card_credit'].includes(p.payment_method)) cumCard += p.amount
+      }
+
+      // Compras históricas
+      const { data: allPurchases } = await supabase
+        .from('purchases')
+        .select('payment_method, total')
+        .eq('status', 'received')
+
+      let cumCashOut = 0, cumNequiOut = 0, cumTransferOut = 0, cumCardOut = 0
+      for (const p of (allPurchases ?? [])) {
+        if (p.payment_method === 'cash') cumCashOut += p.total
+        else if (['nequi', 'daviplata'].includes(p.payment_method)) cumNequiOut += p.total
+        else if (['transfer', 'bancolombia'].includes(p.payment_method)) cumTransferOut += p.total
+        else if (['card_debit', 'card_credit'].includes(p.payment_method)) cumCardOut += p.total
+      }
+
+      // Gastos históricos
+      const { data: allExpenses } = await supabase
+        .from('expenses')
+        .select('payment_method, amount')
+
+      for (const e of (allExpenses ?? [])) {
+        if (e.payment_method === 'cash') cumCashOut += e.amount
+        else if (['nequi', 'daviplata'].includes(e.payment_method)) cumNequiOut += e.amount
+        else if (['transfer', 'bancolombia'].includes(e.payment_method)) cumTransferOut += e.amount
+        else if (['card_debit', 'card_credit'].includes(e.payment_method)) cumCardOut += e.amount
+      }
+
+      // Suma de todas las aperturas de caja (efectivo inicial histórico)
+      const { data: allSessions } = await supabase
+        .from('cash_sessions')
+        .select('opening_amount')
+
+      const totalOpenings = (allSessions ?? []).reduce((s, r) => s + (r.opening_amount ?? 0), 0)
+
+      setCumulative({
+        cash: cumCash, nequi: cumNequi, transfer: cumTransfer, card: cumCard,
+        cash_out: cumCashOut, nequi_out: cumNequiOut,
+        transfer_out: cumTransferOut, card_out: cumCardOut,
+        total_openings: totalOpenings,
+      })
+
     } catch (err) {
       console.error(err)
       setError('No se pudo cargar la información de caja.')
@@ -688,6 +814,61 @@ CREATE POLICY "Authenticated users can manage cash_sessions"
               </div>
             )}
           </div>
+
+          {/* ── Balance acumulado total (protegido por PIN) ───────────────── */}
+          {!showCumulativeBalance ? (
+            <div className="flex justify-end">
+              <button
+                onClick={() => setShowPinBalance(true)}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-500 hover:text-stone-700 text-sm font-medium transition-colors border border-stone-200"
+              >
+                🔐 Ver balance total acumulado
+              </button>
+            </div>
+          ) : (
+            (() => {
+              const efectivoTotal = cumulative.total_openings + cumulative.cash - cumulative.cash_out
+              const nequiTotal    = cumulative.nequi - cumulative.nequi_out
+              const transferTotal = cumulative.transfer - cumulative.transfer_out
+              const cardTotal     = cumulative.card - cumulative.card_out
+
+              const rows = [
+                { icon: '💵', label: 'Efectivo en caja', value: efectivoTotal, sub: `${formatCurrency(cumulative.cash)} ventas · ${formatCurrency(cumulative.total_openings)} aperturas · −${formatCurrency(cumulative.cash_out)} egresos` },
+                ...(cumulative.nequi > 0 || nequiTotal !== 0 ? [{ icon: '📱', label: 'Nequi / Daviplata', value: nequiTotal, sub: `${formatCurrency(cumulative.nequi)} ventas · −${formatCurrency(cumulative.nequi_out)} egresos` }] : []),
+                ...(cumulative.transfer > 0 || transferTotal !== 0 ? [{ icon: '🏦', label: 'Bancolombia / Transferencia', value: transferTotal, sub: `${formatCurrency(cumulative.transfer)} ventas · −${formatCurrency(cumulative.transfer_out)} egresos` }] : []),
+                ...(cumulative.card > 0 || cardTotal !== 0 ? [{ icon: '💳', label: 'Tarjeta (en banco)', value: cardTotal, sub: `${formatCurrency(cumulative.card)} ventas` }] : []),
+              ]
+
+              return (
+                <div className="bg-gradient-to-br from-stone-800 to-stone-900 rounded-2xl p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-xs text-stone-400 font-semibold uppercase tracking-wide">
+                      💰 Dinero acumulado total — desde el inicio
+                    </p>
+                    <button
+                      onClick={() => setShowCumulativeBalance(false)}
+                      className="text-stone-500 hover:text-stone-300 text-xs transition-colors"
+                    >
+                      Ocultar ✕
+                    </button>
+                  </div>
+                  <div className="space-y-3">
+                    {rows.map((row, i) => (
+                      <div key={i} className={`flex items-center justify-between ${i > 0 ? 'border-t border-stone-700 pt-3' : ''}`}>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-white">{row.icon} {row.label}</p>
+                          <p className="text-[11px] text-stone-400 mt-0.5">{row.sub}</p>
+                        </div>
+                        <p className={`text-xl font-bold flex-shrink-0 ml-4 ${row.value < 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                          {formatCurrency(row.value)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })()
+          )}
 
           {/* KPIs del día */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -954,6 +1135,17 @@ CREATE POLICY "Authenticated users can manage cash_sessions"
           summary={summary}
           onConfirm={handleCerrarCaja}
           onClose={() => setShowCerrar(false)}
+        />
+      )}
+
+      {showPinBalance && (
+        <PinModal
+          title="Ver balance acumulado"
+          onSuccess={() => {
+            setShowPinBalance(false)
+            setShowCumulativeBalance(true)
+          }}
+          onClose={() => setShowPinBalance(false)}
         />
       )}
     </div>
