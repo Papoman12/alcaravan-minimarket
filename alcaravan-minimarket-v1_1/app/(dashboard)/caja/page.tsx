@@ -423,10 +423,10 @@ export default function CajaPage() {
   const [cumulative, setCumulative] = useState({
     cash: 0, nequi: 0, transfer: 0, card: 0,
     cash_out: 0, nequi_out: 0, transfer_out: 0, card_out: 0,
-    initial_capital: 0, // solo la apertura del PRIMER día
   })
   const [showCumulativeBalance, setShowCumulativeBalance] = useState(false)
   const [showPinBalance, setShowPinBalance] = useState(false)
+  const [allSessions, setAllSessions] = useState<CashSession[]>([])
 
   const colombiaToday = getColombiaDate()
   const { from: todayFrom, to: todayTo } = getColombiaDateUTCRange(colombiaToday)
@@ -577,24 +577,23 @@ export default function CajaPage() {
         else if (['card_debit', 'card_credit'].includes(e.payment_method)) cumCardOut += e.amount
       }
 
-      // Solo la apertura del PRIMER día (capital inicial real).
-      // No se suman todas las aperturas porque cada día se abre con el mismo
-      // efectivo del día anterior — sumarlas duplicaría el dinero.
-      const { data: firstSession } = await supabase
-        .from('cash_sessions')
-        .select('opening_amount')
-        .order('created_at', { ascending: true })
-        .limit(1)
-        .maybeSingle()
-
-      const initialCapital = firstSession?.opening_amount ?? 0
-
+      // No se suma ninguna apertura porque la apertura de cada día
+      // ya es el dinero acumulado de ventas anteriores — sumarlo sería
+      // contarlo dos veces. El balance es simplemente ventas − egresos.
       setCumulative({
         cash: cumCash, nequi: cumNequi, transfer: cumTransfer, card: cumCard,
         cash_out: cumCashOut, nequi_out: cumNequiOut,
         transfer_out: cumTransferOut, card_out: cumCardOut,
-        initial_capital: initialCapital,
       })
+
+      // ── Historial de sesiones de caja ──────────────────────────────────────
+      const { data: sessionsHistory } = await supabase
+        .from('cash_sessions')
+        .select('*')
+        .order('date', { ascending: false })
+        .limit(60) // últimos 2 meses aprox.
+
+      setAllSessions(sessionsHistory ?? [])
 
     } catch (err) {
       console.error(err)
@@ -832,13 +831,13 @@ CREATE POLICY "Authenticated users can manage cash_sessions"
             </div>
           ) : (
             (() => {
-              const efectivoTotal = cumulative.initial_capital + cumulative.cash - cumulative.cash_out
+              const efectivoTotal = cumulative.cash - cumulative.cash_out
               const nequiTotal    = cumulative.nequi - cumulative.nequi_out
               const transferTotal = cumulative.transfer - cumulative.transfer_out
               const cardTotal     = cumulative.card - cumulative.card_out
 
               const rows = [
-                { icon: '💵', label: 'Efectivo en caja', value: efectivoTotal, sub: `${formatCurrency(cumulative.initial_capital)} capital inicial · +${formatCurrency(cumulative.cash)} ventas · −${formatCurrency(cumulative.cash_out)} egresos` },
+                { icon: '💵', label: 'Efectivo en caja', value: efectivoTotal, sub: `${formatCurrency(cumulative.cash)} ventas · −${formatCurrency(cumulative.cash_out)} egresos` },
                 ...(cumulative.nequi > 0 || nequiTotal !== 0 ? [{ icon: '📱', label: 'Nequi / Daviplata', value: nequiTotal, sub: `${formatCurrency(cumulative.nequi)} ventas · −${formatCurrency(cumulative.nequi_out)} egresos` }] : []),
                 ...(cumulative.transfer > 0 || transferTotal !== 0 ? [{ icon: '🏦', label: 'Bancolombia / Transferencia', value: transferTotal, sub: `${formatCurrency(cumulative.transfer)} ventas · −${formatCurrency(cumulative.transfer_out)} egresos` }] : []),
                 ...(cumulative.card > 0 || cardTotal !== 0 ? [{ icon: '💳', label: 'Tarjeta (en banco)', value: cardTotal, sub: `${formatCurrency(cumulative.card)} ventas` }] : []),
@@ -1117,6 +1116,72 @@ CREATE POLICY "Authenticated users can manage cash_sessions"
             </div>
           )}
         </>
+      )}
+
+      {/* ── Historial de aperturas y cierres ────────────────────────────────── */}
+      {allSessions.length > 1 && (
+        <div className="bg-white border border-stone-200 rounded-2xl overflow-hidden">
+          <div className="px-4 py-3 border-b border-stone-100 flex items-center justify-between">
+            <p className="font-semibold text-stone-800 text-sm">📋 Historial de caja</p>
+            <p className="text-xs text-stone-400">{allSessions.length} sesiones</p>
+          </div>
+          <div className="divide-y divide-stone-50 max-h-96 overflow-y-auto">
+            {allSessions.map((s) => {
+              const fecha = new Date(s.date + 'T12:00:00Z').toLocaleDateString('es-CO', {
+                weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+              })
+              const isToday = s.date === colombiaToday
+              const diff = s.difference ?? 0
+
+              return (
+                <div key={s.id} className={`px-4 py-3 ${isToday ? 'bg-amber-50' : 'hover:bg-stone-50'} transition-colors`}>
+                  <div className="flex items-start justify-between gap-3">
+                    {/* Fecha y estado */}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-medium text-stone-800 capitalize">{fecha}</p>
+                        {isToday && (
+                          <span className="text-[10px] font-semibold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">HOY</span>
+                        )}
+                        {s.status === 'open' ? (
+                          <span className="text-[10px] font-semibold bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block" />
+                            Abierta
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-semibold bg-stone-100 text-stone-500 px-1.5 py-0.5 rounded-full">
+                            Cerrada
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 mt-1 text-xs text-stone-500 flex-wrap">
+                        <span>🔓 Abre: <span className="font-medium text-stone-700">{formatCurrency(s.opening_amount)}</span></span>
+                        {s.closing_amount !== null && (
+                          <span>🔒 Cierra: <span className="font-medium text-stone-700">{formatCurrency(s.closing_amount)}</span></span>
+                        )}
+                      </div>
+                      {s.notes && (
+                        <p className="text-[11px] text-stone-400 mt-1 italic">{s.notes}</p>
+                      )}
+                    </div>
+
+                    {/* Diferencia */}
+                    {s.status === 'closed' && s.difference !== null && (
+                      <div className="text-right flex-shrink-0">
+                        <p className={`text-sm font-bold ${
+                          Math.abs(diff) < 1 ? 'text-emerald-600' : diff > 0 ? 'text-blue-600' : 'text-red-600'
+                        }`}>
+                          {diff > 0 ? '+' : ''}{formatCurrency(diff)}
+                        </p>
+                        <p className="text-[10px] text-stone-400">diferencia</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
       )}
 
       {/* ── Error general ────────────────────────────────────────────────────── */}
