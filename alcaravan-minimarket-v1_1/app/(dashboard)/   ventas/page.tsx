@@ -169,6 +169,7 @@ function SaleDetailModal({
               </span>
             </div>
             <p className="text-stone-500 text-sm mt-0.5">{formatDate(sale.created_at)}</p>
+            <p className="text-[10px] text-purple-500 font-bold">★ v2</p>
           </div>
           <button onClick={onClose} className="w-8 h-8 rounded-xl bg-stone-100 hover:bg-stone-200 flex items-center justify-center text-stone-500">✕</button>
         </div>
