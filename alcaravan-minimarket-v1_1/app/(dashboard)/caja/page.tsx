@@ -504,13 +504,13 @@ export default function CajaPage() {
         cash_expenses: 0, nequi_expenses: 0, transfer_expenses: 0, card_expenses: 0,
       }
 
-      // Compras de hoy por todos los métodos de pago
+      // Compras de hoy por todos los métodos de pago (excluye canceladas)
       const { data: purchasesData } = await supabase
         .from('purchases')
         .select('total, payment_method')
         .gte('created_at', todayFrom)
         .lt('created_at', todayTo)
-        .eq('status', 'received')
+        .neq('status', 'cancelled')
 
       for (const p of (purchasesData ?? [])) {
         if (p.payment_method === 'cash') egresosResult.cash_purchases += p.total
@@ -520,19 +520,18 @@ export default function CajaPage() {
       }
 
       // Gastos de hoy por todos los métodos de pago
-      await Promise.resolve(
-        supabase
-          .from('expenses')
-          .select('amount, payment_method')
-          .eq('date', colombiaToday)
-      ).then(({ data: expData }) => {
-        for (const e of (expData ?? [])) {
-          if (e.payment_method === 'cash') egresosResult.cash_expenses += e.amount
-          else if (['nequi', 'daviplata'].includes(e.payment_method)) egresosResult.nequi_expenses += e.amount
-          else if (['transfer', 'bancolombia'].includes(e.payment_method)) egresosResult.transfer_expenses += e.amount
-          else if (['card_debit', 'card_credit'].includes(e.payment_method)) egresosResult.card_expenses += e.amount
-        }
-      }).catch(() => {}) // Si la tabla expenses no existe, ignorar
+      // (expenses usa 'card' para tarjeta, no 'card_debit'/'card_credit')
+      const { data: expData } = await supabase
+        .from('expenses')
+        .select('amount, payment_method')
+        .eq('date', colombiaToday)
+
+      for (const e of (expData ?? [])) {
+        if (e.payment_method === 'cash') egresosResult.cash_expenses += e.amount
+        else if (['nequi', 'daviplata'].includes(e.payment_method)) egresosResult.nequi_expenses += e.amount
+        else if (['transfer', 'bancolombia'].includes(e.payment_method)) egresosResult.transfer_expenses += e.amount
+        else if (['card', 'card_debit', 'card_credit'].includes(e.payment_method)) egresosResult.card_expenses += e.amount
+      }
 
       setEgresos(egresosResult)
 
@@ -551,11 +550,13 @@ export default function CajaPage() {
         else if (['card_debit', 'card_credit'].includes(p.payment_method)) cumCard += p.amount
       }
 
-      // Compras históricas
+      // Compras históricas — sin filtro de status para capturar TODAS las
+      // compras pagadas, independientemente de si llegaron o no.
+      // Solo excluimos las canceladas (si tienen ese campo).
       const { data: allPurchases } = await supabase
         .from('purchases')
-        .select('payment_method, total')
-        .eq('status', 'received')
+        .select('payment_method, total, status')
+        .neq('status', 'cancelled')
 
       let cumCashOut = 0, cumNequiOut = 0, cumTransferOut = 0, cumCardOut = 0
       for (const p of (allPurchases ?? [])) {
@@ -565,16 +566,18 @@ export default function CajaPage() {
         else if (['card_debit', 'card_credit'].includes(p.payment_method)) cumCardOut += p.total
       }
 
-      // Gastos históricos
-      const { data: allExpenses } = await supabase
+      // Gastos históricos — manejamos el error explícitamente
+      const { data: allExpenses, error: expErr } = await supabase
         .from('expenses')
         .select('payment_method, amount')
 
-      for (const e of (allExpenses ?? [])) {
-        if (e.payment_method === 'cash') cumCashOut += e.amount
-        else if (['nequi', 'daviplata'].includes(e.payment_method)) cumNequiOut += e.amount
-        else if (['transfer', 'bancolombia'].includes(e.payment_method)) cumTransferOut += e.amount
-        else if (['card_debit', 'card_credit'].includes(e.payment_method)) cumCardOut += e.amount
+      if (!expErr) {
+        for (const e of (allExpenses ?? [])) {
+          if (e.payment_method === 'cash') cumCashOut += e.amount
+          else if (['nequi', 'daviplata'].includes(e.payment_method)) cumNequiOut += e.amount
+          else if (['transfer', 'bancolombia'].includes(e.payment_method)) cumTransferOut += e.amount
+          else if (['card', 'card_debit', 'card_credit'].includes(e.payment_method)) cumCardOut += e.amount
+        }
       }
 
       // No se suma ninguna apertura porque la apertura de cada día
@@ -908,6 +911,7 @@ CREATE POLICY "Authenticated users can manage cash_sessions"
               - egresos.nequi_purchases - egresos.nequi_expenses
             const transferBal = summary.transfer_sales
               - egresos.transfer_purchases - egresos.transfer_expenses
+            // card_sales incluye card_debit+card_credit; card_expenses usa 'card'
             const cardBal = summary.card_sales - egresos.card_purchases - egresos.card_expenses
 
             const rows = [
