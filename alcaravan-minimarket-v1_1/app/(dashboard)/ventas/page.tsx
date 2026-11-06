@@ -8,6 +8,7 @@ import { getColombiaDateUTCRange } from '@/lib/colombia-time'
 // ─── Tipos ──────────────────────────────────────────────────────────
 interface SaleItem {
   id: string
+  product_id?: string
   product_name: string
   product_code?: string
   quantity: number
@@ -88,11 +89,13 @@ function SaleDetailModal({
   onClose,
   onAddPayment,
   onEdit,
+  onReturn,
 }: {
   sale: Sale
   onClose: () => void
   onAddPayment: (sale: Sale) => void
   onEdit: (sale: Sale) => void
+  onReturn: (sale: Sale) => void
 }) {
   const isPending = sale.status === 'pending'
   const pendingAmount = (sale.pending_amount ?? 0)
@@ -166,6 +169,7 @@ function SaleDetailModal({
               </span>
             </div>
             <p className="text-stone-500 text-sm mt-0.5">{formatDate(sale.created_at)}</p>
+            <p className="text-[10px] text-purple-500 font-bold">★ v2</p>
           </div>
           <button onClick={onClose} className="w-8 h-8 rounded-xl bg-stone-100 hover:bg-stone-200 flex items-center justify-center text-stone-500">✕</button>
         </div>
@@ -266,11 +270,17 @@ function SaleDetailModal({
         {/* Footer */}
         <div className="px-5 py-4 border-t space-y-2">
           <div className="flex gap-2">
-            <button onClick={handlePrint} className="flex-1 py-2.5 border border-stone-200 rounded-xl text-stone-700 font-medium hover:bg-stone-50 flex items-center justify-center gap-2">
+            <button onClick={handlePrint} className="flex-1 py-2.5 border border-stone-200 rounded-xl text-stone-700 font-medium hover:bg-stone-50 flex items-center justify-center gap-2 text-sm">
               🖨️ Imprimir
             </button>
-            <button onClick={() => onEdit(sale)} className="flex-1 py-2.5 border-2 border-amber-300 rounded-xl text-amber-700 font-semibold hover:bg-amber-50 flex items-center justify-center gap-2">
+            <button onClick={() => onEdit(sale)} className="flex-1 py-2.5 border-2 border-amber-300 rounded-xl text-amber-700 font-semibold hover:bg-amber-50 flex items-center justify-center gap-2 text-sm">
               ✏️ Editar
+            </button>
+            <button
+              onClick={() => onReturn(sale)}
+              className="flex-1 py-2.5 border-2 border-purple-300 rounded-xl text-purple-700 font-semibold hover:bg-purple-50 flex items-center justify-center gap-2 text-sm"
+            >
+              ↩️ Devolver
             </button>
           </div>
           <button onClick={onClose} className="w-full py-2.5 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800">
@@ -642,6 +652,249 @@ function AddPaymentModal({
   )
 }
 
+// ─── Modal devolución / nota crédito ────────────────────────────────
+function ReturnModal({
+  sale,
+  onClose,
+  onSaved,
+}: {
+  sale: Sale
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [returnItems, setReturnItems] = useState(
+    (sale.sale_items ?? []).map((item) => ({ item, qty: item.quantity, selected: false }))
+  )
+  const [refundMethod, setRefundMethod] = useState('cash')
+  const [reason, setReason] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const selectedItems = returnItems.filter((r) => r.selected && r.qty > 0)
+  const returnTotal = selectedItems.reduce((s, r) => s + r.item.unit_price * r.qty, 0)
+
+  const METHODS = [
+    { key: 'cash',        label: '💵 Efectivo' },
+    { key: 'nequi',       label: '📱 Nequi' },
+    { key: 'daviplata',   label: '📱 Daviplata' },
+    { key: 'transfer',    label: '🏦 Transferencia' },
+    { key: 'card_debit',  label: '💳 Débito' },
+  ]
+
+  async function handleReturn() {
+    if (selectedItems.length === 0) {
+      setError('Selecciona al menos un producto para devolver')
+      return
+    }
+    setSaving(true)
+    setError('')
+    const supabase = createClient()
+
+    try {
+      // 1. Crear venta de devolución
+      const returnNumber = 'DEV' + Date.now().toString().slice(-8)
+      const { data: returnSale, error: saleErr } = await supabase
+        .from('sales')
+        .insert({
+          sale_number: returnNumber,
+          customer_id: sale.customer_id ?? null,
+          subtotal: returnTotal,
+          discount_amount: 0,
+          tax_amount: 0,
+          total: returnTotal,
+          status: 'returned',
+          notes: `Devolución de ${sale.sale_number}${reason ? ': ' + reason : ''}`,
+        })
+        .select()
+        .single()
+
+      if (saleErr || !returnSale) throw saleErr ?? new Error('Error al crear devolución')
+
+      // 2. Crear sale_items de la devolución
+      await supabase.from('sale_items').insert(
+        selectedItems.map((r) => ({
+          sale_id: returnSale.id,
+          product_id: r.item.product_id ?? null,
+          product_name: r.item.product_name,
+          product_code: r.item.product_code ?? null,
+          quantity: r.qty,
+          unit_price: r.item.unit_price,
+          purchase_price: 0,
+          discount_percentage: 0,
+          discount_amount: 0,
+          tax_rate: 0,
+          tax_amount: 0,
+          subtotal: r.item.unit_price * r.qty,
+          total: r.item.unit_price * r.qty,
+        }))
+      )
+
+      // 3. Registrar el reembolso
+      await supabase.from('sale_payments').insert({
+        sale_id: returnSale.id,
+        payment_method: refundMethod,
+        amount: returnTotal,
+        change_amount: 0,
+      })
+
+      // 4. Ajustar inventario: devolver stock
+      for (const r of selectedItems) {
+        if (r.item.product_id) {
+          const { data: prod } = await supabase
+            .from('products')
+            .select('stock')
+            .eq('id', r.item.product_id)
+            .single()
+          if (prod) {
+            await supabase
+              .from('products')
+              .update({ stock: prod.stock + r.qty })
+              .eq('id', r.item.product_id)
+          }
+        }
+      }
+
+      onSaved()
+    } catch (err) {
+      console.error(err)
+      setError('Error al procesar la devolución. Intenta de nuevo.')
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="px-5 py-4 border-b flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-stone-800 text-lg">↩️ Devolución</h3>
+            <p className="text-stone-500 text-sm">{sale.sale_number}</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-stone-100 hover:bg-stone-200 flex items-center justify-center text-stone-500">✕</button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-3 py-2 text-sm">{error}</div>
+          )}
+
+          {/* Seleccionar ítems */}
+          <div>
+            <p className="text-sm font-semibold text-stone-700 mb-2">Selecciona los productos a devolver</p>
+            <div className="space-y-2">
+              {returnItems.map((r, idx) => (
+                <div
+                  key={idx}
+                  className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${r.selected ? 'border-amber-300 bg-amber-50' : 'border-stone-200'}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={r.selected}
+                    onChange={(e) =>
+                      setReturnItems((items) =>
+                        items.map((it, i) => i === idx ? { ...it, selected: e.target.checked } : it)
+                      )
+                    }
+                    className="w-4 h-4 accent-amber-700 flex-shrink-0"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-stone-800">{r.item.product_name}</p>
+                    <p className="text-xs text-stone-400">
+                      {formatCurrency(r.item.unit_price)} × cant. original: {r.item.quantity}
+                    </p>
+                  </div>
+                  {r.selected && (
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <button
+                        onClick={() =>
+                          setReturnItems((items) =>
+                            items.map((it, i) => i === idx ? { ...it, qty: Math.max(1, it.qty - 1) } : it)
+                          )
+                        }
+                        className="w-7 h-7 rounded-lg bg-stone-200 text-stone-700 hover:bg-stone-300 font-bold text-sm"
+                      >−</button>
+                      <span className="w-6 text-center text-sm font-bold text-stone-800">{r.qty}</span>
+                      <button
+                        onClick={() =>
+                          setReturnItems((items) =>
+                            items.map((it, i) => i === idx ? { ...it, qty: Math.min(it.item.quantity, it.qty + 1) } : it)
+                          )
+                        }
+                        className="w-7 h-7 rounded-lg bg-stone-200 text-stone-700 hover:bg-stone-300 font-bold text-sm"
+                      >+</button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Motivo */}
+          <div>
+            <label className="block text-sm font-medium text-stone-700 mb-1">Motivo (opcional)</label>
+            <input
+              type="text"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Ej: producto cobrado de más, cliente insatisfecho..."
+              className="w-full px-3 py-2 rounded-xl border border-stone-200 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700"
+            />
+          </div>
+
+          {/* Método de reembolso */}
+          {selectedItems.length > 0 && (
+            <div>
+              <p className="text-sm font-semibold text-stone-700 mb-2">Devolver dinero por</p>
+              <div className="grid grid-cols-3 gap-2">
+                {METHODS.map((m) => (
+                  <button
+                    key={m.key}
+                    onClick={() => setRefundMethod(m.key)}
+                    className={`py-2 rounded-xl text-xs font-medium border transition-all ${
+                      refundMethod === m.key
+                        ? 'bg-amber-700 text-white border-amber-700'
+                        : 'border-stone-200 text-stone-600 hover:border-amber-300'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Total a devolver */}
+          {selectedItems.length > 0 && (
+            <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 flex justify-between items-center">
+              <div>
+                <p className="text-xs text-purple-600 font-medium uppercase tracking-wide">Total a devolver</p>
+                <p className="text-2xl font-bold text-purple-700">{formatCurrency(returnTotal)}</p>
+                <p className="text-xs text-purple-400 mt-0.5">
+                  {selectedItems.length} producto(s) · {selectedItems.reduce((s, r) => s + r.qty, 0)} unid.
+                </p>
+              </div>
+              <span className="text-4xl">↩️</span>
+            </div>
+          )}
+        </div>
+
+        <div className="px-5 pb-5 flex gap-3">
+          <button onClick={onClose} className="flex-1 py-2.5 border border-stone-200 rounded-xl text-stone-600 hover:bg-stone-50 font-medium">
+            Cancelar
+          </button>
+          <button
+            onClick={handleReturn}
+            disabled={saving || selectedItems.length === 0}
+            className="flex-1 py-2.5 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 disabled:bg-stone-300 transition-colors"
+          >
+            {saving ? 'Procesando...' : '↩️ Confirmar devolución'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Página principal ────────────────────────────────────────────────
 export default function VentasPage() {
   const [sales, setSales] = useState<Sale[]>([])
@@ -653,6 +906,7 @@ export default function VentasPage() {
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null)
   const [payingSale, setPayingSale] = useState<Sale | null>(null)
   const [editingSale, setEditingSale] = useState<Sale | null>(null)
+  const [returningSale, setReturningSale] = useState<Sale | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -664,7 +918,7 @@ export default function VentasPage() {
         notes, created_at, customer_id,
         customers(id, first_name, last_name, full_name, phone),
         users(full_name),
-        sale_items(id, product_name, product_code, quantity, unit_price, discount_amount, tax_amount, total),
+        sale_items(id, product_id, product_name, product_code, quantity, unit_price, discount_amount, tax_amount, total),
         sale_payments(id, payment_method, amount, reference, received_amount, change_amount)
       `)
       .order('created_at', { ascending: false })
@@ -827,7 +1081,23 @@ export default function VentasPage() {
             setSelectedSale(null)
             setEditingSale(sale)
           }}
+          onReturn={(sale) => {
+            setSelectedSale(null)
+            setReturningSale(sale)
+          }}
         />
+      )}
+
+      {/* Botón Devolver flotante — aparece sobre el modal de detalle */}
+      {selectedSale && (selectedSale.sale_items ?? []).length > 0 && selectedSale.status !== 'returned' && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[60]">
+          <button
+            onClick={() => { setSelectedSale(null); setReturningSale(selectedSale) }}
+            className="px-6 py-3 bg-purple-600 text-white font-bold rounded-2xl shadow-2xl shadow-purple-600/40 flex items-center gap-2 text-sm"
+          >
+            ↩️ Devolver productos
+          </button>
+        </div>
       )}
 
       {/* Modal editar venta */}
@@ -849,6 +1119,18 @@ export default function VentasPage() {
           onClose={() => setPayingSale(null)}
           onSaved={() => {
             setPayingSale(null)
+            load()
+          }}
+        />
+      )}
+
+      {/* Modal devolución */}
+      {returningSale && (
+        <ReturnModal
+          sale={returningSale}
+          onClose={() => setReturningSale(null)}
+          onSaved={() => {
+            setReturningSale(null)
             load()
           }}
         />
