@@ -286,9 +286,9 @@ function DetalleMetodoModal({ methodKey, onClose }: { methodKey: MethodKey; onCl
 
   useEffect(() => { loadData() }, [methodKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const totalVentas  = ventas.reduce((s, v) => s + v.amount, 0)
-  const totalCompras = compras.reduce((s, c) => s + c.total, 0)
-  const totalGastos  = gastos.reduce((s, g) => s + g.amount, 0)
+  const totalVentas  = ventas.reduce((s, v) => s + (Number(v.amount)  || 0), 0)
+  const totalCompras = compras.reduce((s, c) => s + (Number(c.total)  || 0), 0)
+  const totalGastos  = gastos.reduce((s, g) => s + (Number(g.amount) || 0), 0)
   const neto = totalVentas - totalCompras - totalGastos
 
   const tabs = [
@@ -382,10 +382,15 @@ function DetalleMetodoModal({ methodKey, onClose }: { methodKey: MethodKey; onCl
                         <div key={c.id} className="flex items-center justify-between px-5 py-3 hover:bg-stone-50">
                           <div className="min-w-0 flex-1">
                             <p className="text-sm font-medium text-stone-800">{c.supplier_name ?? 'Sin proveedor'}</p>
-                            <p className="text-xs text-stone-400">{formatColombiaTime(c.created_at)}{c.notes ? ` · ${c.notes}` : ''}</p>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="text-[10px] bg-stone-100 text-stone-500 px-1.5 py-0.5 rounded font-mono">
+                                {c.payment_method ?? 'sin método'}
+                              </span>
+                              <span className="text-xs text-stone-400">{formatColombiaTime(c.created_at)}{c.notes ? ` · ${c.notes}` : ''}</span>
+                            </div>
                           </div>
                           <div className="flex items-center gap-2 flex-shrink-0 ml-3">
-                            <p className="text-sm font-bold text-red-600">−{formatCurrency(c.total)}</p>
+                            <p className="text-sm font-bold text-red-600">−{formatCurrency(Number(c.total) || 0)}</p>
                             <button
                               onClick={() => setEditCompra(c)}
                               className="text-stone-300 hover:text-amber-600 transition-colors p-1 rounded"
@@ -888,10 +893,12 @@ export default function CajaPage() {
 
       let cumCash = 0, cumNequi = 0, cumTransfer = 0, cumCard = 0
       for (const p of (allPayments ?? [])) {
-        if (p.payment_method === 'cash') cumCash += p.amount
-        else if (['nequi', 'daviplata'].includes(p.payment_method)) cumNequi += p.amount
-        else if (['transfer', 'bancolombia'].includes(p.payment_method)) cumTransfer += p.amount
-        else if (['card_debit', 'card_credit'].includes(p.payment_method)) cumCard += p.amount
+        const pm  = (p.payment_method ?? '').toLowerCase()
+        const amt = Number(p.amount) || 0
+        if (pm === 'cash') cumCash += amt
+        else if (['nequi', 'daviplata'].includes(pm)) cumNequi += amt
+        else if (['transfer', 'bancolombia'].includes(pm)) cumTransfer += amt
+        else if (['card', 'card_debit', 'card_credit'].includes(pm)) cumCard += amt
       }
 
       // Compras históricas — sin filtro de status para capturar TODAS las
@@ -905,10 +912,12 @@ export default function CajaPage() {
       let cumCashOut = 0, cumNequiOut = 0, cumTransferOut = 0, cumCardOut = 0
       let cumCashPurchases = 0 // para desglose en UI
       for (const p of (allPurchases ?? [])) {
-        if (p.payment_method === 'cash') { cumCashOut += p.total; cumCashPurchases += p.total }
-        else if (['nequi', 'daviplata'].includes(p.payment_method)) cumNequiOut += p.total
-        else if (['transfer', 'bancolombia'].includes(p.payment_method)) cumTransferOut += p.total
-        else if (['card', 'card_debit', 'card_credit'].includes(p.payment_method)) cumCardOut += p.total
+        const pm = (p.payment_method ?? '').toLowerCase()
+        const amt = Number(p.total) || 0
+        if (pm === 'cash') { cumCashOut += amt; cumCashPurchases += amt }
+        else if (['nequi', 'daviplata'].includes(pm)) cumNequiOut += amt
+        else if (['transfer', 'bancolombia'].includes(pm)) cumTransferOut += amt
+        else if (['card', 'card_debit', 'card_credit'].includes(pm)) cumCardOut += amt
       }
 
       // Gastos históricos — manejamos el error explícitamente
@@ -919,10 +928,12 @@ export default function CajaPage() {
       let cumCashExpenses = 0 // para desglose en UI
       if (!expErr) {
         for (const e of (allExpenses ?? [])) {
-          if (e.payment_method === 'cash') { cumCashOut += e.amount; cumCashExpenses += e.amount }
-          else if (['nequi', 'daviplata'].includes(e.payment_method)) cumNequiOut += e.amount
-          else if (['transfer', 'bancolombia'].includes(e.payment_method)) cumTransferOut += e.amount
-          else if (['card', 'card_debit', 'card_credit'].includes(e.payment_method)) cumCardOut += e.amount
+          const pm = (e.payment_method ?? '').toLowerCase()
+          const amt = Number(e.amount) || 0
+          if (pm === 'cash') { cumCashOut += amt; cumCashExpenses += amt }
+          else if (['nequi', 'daviplata'].includes(pm)) cumNequiOut += amt
+          else if (['transfer', 'bancolombia'].includes(pm)) cumTransferOut += amt
+          else if (['card', 'card_debit', 'card_credit'].includes(pm)) cumCardOut += amt
         }
       }
 
