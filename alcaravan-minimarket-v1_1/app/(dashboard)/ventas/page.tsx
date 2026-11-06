@@ -894,6 +894,63 @@ function ReturnModal({
   )
 }
 
+// ─── PIN de administrador ─────────────────────────────────────────────
+const ADMIN_PIN = '0915'
+
+// ─── Modal de PIN ─────────────────────────────────────────────────────
+function PinModal({ onSuccess, onClose, title = 'Acción restringida' }: {
+  onSuccess: () => void
+  onClose: () => void
+  title?: string
+}) {
+  const [pin, setPin] = useState('')
+  const [error, setError] = useState('')
+
+  function handleVerify() {
+    if (pin === ADMIN_PIN) {
+      onSuccess()
+    } else {
+      setError('PIN incorrecto')
+      setPin('')
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/70 z-[70] flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs">
+        <div className="px-6 py-5 border-b border-stone-100">
+          <h2 className="text-lg font-bold text-stone-800">🔐 {title}</h2>
+          <p className="text-stone-500 text-sm mt-0.5">Solo el administrador puede realizar esta acción</p>
+        </div>
+        <div className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-stone-700 mb-1">PIN de administrador</label>
+            <input
+              type="password"
+              value={pin}
+              onChange={(e) => { setPin(e.target.value); setError('') }}
+              onKeyDown={(e) => e.key === 'Enter' && handleVerify()}
+              placeholder="••••"
+              autoFocus
+              maxLength={6}
+              className="w-full px-4 py-3 rounded-xl border border-stone-200 text-center text-2xl tracking-widest font-bold focus:outline-none focus:ring-2 focus:ring-purple-400"
+            />
+            {error && <p className="text-red-500 text-sm mt-1 text-center">{error}</p>}
+          </div>
+        </div>
+        <div className="px-6 pb-6 flex gap-3">
+          <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-stone-200 text-stone-600 font-medium hover:bg-stone-50">
+            Cancelar
+          </button>
+          <button onClick={handleVerify} className="flex-1 py-3 rounded-xl bg-purple-600 text-white font-bold hover:bg-purple-700">
+            Confirmar
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Página principal ────────────────────────────────────────────────
 export default function VentasPage() {
   const [sales, setSales] = useState<Sale[]>([])
@@ -906,6 +963,7 @@ export default function VentasPage() {
   const [payingSale, setPayingSale] = useState<Sale | null>(null)
   const [editingSale, setEditingSale] = useState<Sale | null>(null)
   const [returningSale, setReturningSale] = useState<Sale | null>(null)
+  const [pinForReturn, setPinForReturn] = useState<Sale | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -1091,12 +1149,26 @@ export default function VentasPage() {
       {selectedSale && (selectedSale.sale_items ?? []).length > 0 && selectedSale.status !== 'returned' && (
         <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[60]">
           <button
-            onClick={() => { setSelectedSale(null); setReturningSale(selectedSale) }}
+            onClick={() => setPinForReturn(selectedSale)}
             className="px-6 py-3 bg-purple-600 text-white font-bold rounded-2xl shadow-2xl shadow-purple-600/40 flex items-center gap-2 text-sm"
           >
             ↩️ Devolver productos
           </button>
         </div>
+      )}
+
+      {/* Modal PIN para devolución */}
+      {pinForReturn && (
+        <PinModal
+          title="Devolución / Corrección"
+          onClose={() => setPinForReturn(null)}
+          onSuccess={() => {
+            const sale = pinForReturn
+            setPinForReturn(null)
+            setSelectedSale(null)
+            setReturningSale(sale)
+          }}
+        />
       )}
 
       {/* Modal editar venta */}
