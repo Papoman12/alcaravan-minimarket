@@ -119,7 +119,17 @@ const METHOD_INFO: Record<MethodKey, { label: string; icon: string; methods: str
 }
 
 // ─── Sub-modal: Editar compra ─────────────────────────────────────────────────
-interface CompraRow { id: string; supplier_name?: string; created_at: string; total: number; notes?: string; payment_method?: string }
+// supplier_name NO es una columna directa — viene del join suppliers(name)
+interface CompraRow {
+  id: string
+  purchase_number?: string
+  supplier?: { name: string } | null
+  created_at: string
+  total: number
+  notes?: string
+  payment_method?: string
+  status?: string
+}
 
 function EditCompraModal({ compra, onSave, onClose }: {
   compra: CompraRow
@@ -128,59 +138,51 @@ function EditCompraModal({ compra, onSave, onClose }: {
 }) {
   const supabase = createClient()
   const [form, setForm] = useState({
-    supplier_name: compra.supplier_name ?? '',
-    total:         String(compra.total),
+    total:          String(compra.total),
     payment_method: compra.payment_method ?? 'cash',
-    notes:         compra.notes ?? '',
+    notes:          compra.notes ?? '',
   })
   const [saving, setSaving] = useState(false)
   const [error,  setError]  = useState('')
 
   const PM_OPTIONS = [
-    { value: 'cash',       label: '💵 Efectivo' },
-    { value: 'nequi',      label: '📱 Nequi' },
-    { value: 'daviplata',  label: '📱 Daviplata' },
-    { value: 'transfer',   label: '🏦 Transferencia' },
-    { value: 'bancolombia',label: '🏦 Bancolombia' },
-    { value: 'card',       label: '💳 Tarjeta' },
+    { value: 'cash',     label: '💵 Efectivo' },
+    { value: 'nequi',    label: '📱 Nequi' },
+    { value: 'transfer', label: '🏦 Transferencia' },
+    { value: 'credit',   label: '📋 Crédito' },
   ]
 
   async function handleSave() {
     const totalNum = parseFloat(form.total.replace(/[^0-9.]/g, ''))
-    if (isNaN(totalNum) || totalNum <= 0) { setError('El total debe ser un número mayor a 0'); return }
+    if (isNaN(totalNum) || totalNum <= 0) { setError('El total debe ser mayor a 0'); return }
     setSaving(true); setError('')
     const { error: err } = await supabase
       .from('purchases')
       .update({
-        supplier_name:  form.supplier_name || null,
         total:          totalNum,
+        subtotal:       totalNum,
         payment_method: form.payment_method,
         notes:          form.notes || null,
       })
       .eq('id', compra.id)
     setSaving(false)
-    if (err) { setError('Error al guardar: ' + err.message); return }
-    onSave({ ...compra, supplier_name: form.supplier_name || undefined, total: totalNum,
-             payment_method: form.payment_method, notes: form.notes || undefined })
+    if (err) { setError('Error: ' + err.message); return }
+    onSave({ ...compra, total: totalNum, payment_method: form.payment_method, notes: form.notes || undefined })
   }
+
+  const supplierName = compra.supplier?.name ?? compra.purchase_number ?? 'Sin proveedor'
 
   return (
     <div className="fixed inset-0 bg-black/70 z-[80] flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
         <div className="px-5 py-4 border-b border-stone-100 flex items-center justify-between">
-          <h3 className="text-base font-bold text-stone-800">✏️ Editar compra</h3>
+          <div>
+            <h3 className="text-base font-bold text-stone-800">✏️ Editar compra</h3>
+            <p className="text-xs text-stone-400 mt-0.5">{supplierName}</p>
+          </div>
           <button onClick={onClose} className="text-stone-400 hover:text-stone-600 text-2xl leading-none">×</button>
         </div>
         <div className="px-5 py-4 space-y-3">
-          <div>
-            <label className="block text-xs font-semibold text-stone-600 mb-1">Proveedor</label>
-            <input
-              className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
-              value={form.supplier_name}
-              onChange={e => setForm(f => ({ ...f, supplier_name: e.target.value }))}
-              placeholder="Nombre del proveedor"
-            />
-          </div>
           <div>
             <label className="block text-xs font-semibold text-stone-600 mb-1">Total ($)</label>
             <input
@@ -198,9 +200,7 @@ function EditCompraModal({ compra, onSave, onClose }: {
               value={form.payment_method}
               onChange={e => setForm(f => ({ ...f, payment_method: e.target.value }))}
             >
-              {PM_OPTIONS.map(o => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
+              {PM_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
           <div>
@@ -215,14 +215,9 @@ function EditCompraModal({ compra, onSave, onClose }: {
           {error && <p className="text-xs text-red-600">{error}</p>}
         </div>
         <div className="px-5 pb-4 flex gap-2">
-          <button onClick={onClose} className="flex-1 py-2 rounded-lg border border-stone-200 text-sm text-stone-600 hover:bg-stone-50">
-            Cancelar
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="flex-1 py-2 rounded-lg bg-amber-700 text-white text-sm font-semibold hover:bg-amber-800 disabled:opacity-50"
-          >
+          <button onClick={onClose} className="flex-1 py-2 rounded-lg border border-stone-200 text-sm text-stone-600 hover:bg-stone-50">Cancelar</button>
+          <button onClick={handleSave} disabled={saving}
+            className="flex-1 py-2 rounded-lg bg-amber-700 text-white text-sm font-semibold hover:bg-amber-800 disabled:opacity-50">
             {saving ? 'Guardando…' : 'Guardar'}
           </button>
         </div>
@@ -259,12 +254,14 @@ function DetalleMetodoModal({ methodKey, onClose }: { methodKey: MethodKey; onCl
     )
 
     // Compras — traemos TODAS y filtramos en JS (igual que la vista acumulada)
-    // para garantizar que el resultado coincide con el total acumulado
-    const { data: allPurch } = await supabase
+    // IMPORTANTE: supplier_name no existe como columna — usamos join suppliers(name)
+    const { data: allPurch, error: purchErr } = await supabase
       .from('purchases')
-      .select('id, supplier_name, created_at, total, notes, payment_method, status')
+      .select('id, purchase_number, created_at, total, notes, payment_method, status, supplier:suppliers(name)')
       .neq('status', 'cancelled')
       .order('created_at', { ascending: false })
+
+    if (purchErr) console.error('purchases query error:', purchErr)
 
     const filtered = (allPurch ?? []).filter(p =>
       info.methods.map(m => m.toLowerCase()).includes((p.payment_method ?? '').toLowerCase())
@@ -381,7 +378,7 @@ function DetalleMetodoModal({ methodKey, onClose }: { methodKey: MethodKey; onCl
                     : compras.map(c => (
                         <div key={c.id} className="flex items-center justify-between px-5 py-3 hover:bg-stone-50">
                           <div className="min-w-0 flex-1">
-                            <p className="text-sm font-medium text-stone-800">{c.supplier_name ?? 'Sin proveedor'}</p>
+                            <p className="text-sm font-medium text-stone-800">{c.supplier?.name ?? c.purchase_number ?? 'Sin proveedor'}</p>
                             <div className="flex items-center gap-1.5 mt-0.5">
                               <span className="text-[10px] bg-stone-100 text-stone-500 px-1.5 py-0.5 rounded font-mono">
                                 {c.payment_method ?? 'sin método'}
