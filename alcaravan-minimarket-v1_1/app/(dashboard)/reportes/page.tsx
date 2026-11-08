@@ -2,8 +2,6 @@
 
 import { useEffect, useState, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { toColombiaDate } from '@/lib/colombia-time'
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface SaleItemRow {
   quantity: number
