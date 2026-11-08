@@ -87,7 +87,7 @@ export default function ReportesPage() {
   }, [filtered])
 
   // ─── Top products by profit ───────────────────────────────────────────────────
-  const topProducts = useMemo(() => {
+  const allProducts = useMemo(() => {
     const map = new Map<string, ProductStat>()
     for (const r of filtered) {
       const name = r.product_name ?? 'Sin nombre'
@@ -100,10 +100,11 @@ export default function ReportesPage() {
       existing.units   += Number(r.quantity) || 1
       map.set(name, existing)
     }
-    return Array.from(map.values())
-      .sort((a, b) => b.profit - a.profit)
-      .slice(0, 15)
+    return Array.from(map.values()).sort((a, b) => b.profit - a.profit)
   }, [filtered])
+
+  // Top 15 para la gráfica de barras; tabla usa todos
+  const topProducts = allProducts.slice(0, 15)
 
   const maxProfit = topProducts.length > 0 ? Math.max(...topProducts.map(p => Math.abs(p.profit))) : 1
 
@@ -258,10 +259,11 @@ export default function ReportesPage() {
             )}
 
             {/* Detail table */}
-            {topProducts.length > 0 && (
+            {allProducts.length > 0 && (
               <div className="bg-white rounded-xl border border-stone-200 overflow-hidden">
-                <div className="px-5 py-4 border-b border-stone-100">
+                <div className="px-5 py-4 border-b border-stone-100 flex items-center justify-between">
                   <h2 className="text-sm font-semibold text-stone-800">Detalle por producto</h2>
+                  <span className="text-xs text-stone-400">{allProducts.length} productos</span>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
@@ -276,7 +278,7 @@ export default function ReportesPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {topProducts.map((p, i) => {
+                      {allProducts.map((p, i) => {
                         const margin = p.revenue > 0 ? (p.profit / p.revenue) * 100 : 0
                         const isNeg = p.profit < 0
                         return (
