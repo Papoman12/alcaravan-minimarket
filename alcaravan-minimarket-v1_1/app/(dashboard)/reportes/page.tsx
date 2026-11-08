@@ -124,25 +124,39 @@ export default function ReportesPage() {
       setExpenses(expData ?? [])
 
       // 4. Fiado — ventas con status 'pending' (registradas como fiado en el POS)
-      // customer_name no es columna directa → join con customers
+      // Primero query simple sin join para verificar que hay registros
       const { data: fiadoData, error: fiadoErr } = await supabase
         .from('sales')
-        .select('id, total, created_at, customer:customers(name)')
+        .select('id, total, created_at, customer_id, sale_number')
         .eq('status', 'pending')
         .order('created_at', { ascending: false })
 
-      if (fiadoErr) console.error('fiado query:', fiadoErr)
+      if (fiadoErr) {
+        console.error('fiado query error:', fiadoErr)
+      } else {
+        console.log('fiado rows found:', fiadoData?.length, fiadoData)
+      }
+
+      // Si hay registros con customer_id, intentar traer el nombre del cliente
+      const fiadoIds = (fiadoData ?? []).map((s: any) => s.customer_id).filter(Boolean)
+      let customerMap: Record<string, string> = {}
+      if (fiadoIds.length > 0) {
+        const { data: custData } = await supabase
+          .from('customers')
+          .select('id, name')
+          .in('id', fiadoIds)
+        for (const c of custData ?? []) {
+          customerMap[c.id] = c.name
+        }
+      }
 
       const fiadoRows = (fiadoData ?? [])
-        .filter((s: any) => (Number(s.total) || 0) > 0)
+        .filter((s: any) => (Number(s.total) || 0) >= 0)
         .map((s: any) => ({
           id: s.id,
           total: Number(s.total) || 0,
           created_at: s.created_at,
-          // customer puede ser array (join) u objeto según Supabase
-          customer_name: Array.isArray(s.customer)
-            ? (s.customer[0]?.name ?? null)
-            : (s.customer?.name ?? null),
+          customer_name: s.customer_id ? (customerMap[s.customer_id] ?? 'Cliente') : (s.sale_number ?? 'Sin cliente'),
         }))
       setFiado(fiadoRows)
 
