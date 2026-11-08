@@ -123,22 +123,26 @@ export default function ReportesPage() {
       if (expErr) console.error('expenses:', expErr)
       setExpenses(expData ?? [])
 
-      // 4. Fiado — ventas con payment_method 'credit'/'fiado' o status 'pending'
-      // Intentamos desde sale_payments o desde sales directamente
-      const { data: fiadoData } = await supabase
+      // 4. Fiado — ventas con status 'pending' (registradas como fiado en el POS)
+      // customer_name no es columna directa → join con customers
+      const { data: fiadoData, error: fiadoErr } = await supabase
         .from('sales')
-        .select('id, total, created_at, customer_name, status, payment_method')
-        .or('payment_method.eq.credit,payment_method.eq.fiado,status.eq.pending')
+        .select('id, total, created_at, customer:customers(name)')
+        .eq('status', 'pending')
         .order('created_at', { ascending: false })
 
-      // Solo tomamos las que tienen monto pendiente de cobro
+      if (fiadoErr) console.error('fiado query:', fiadoErr)
+
       const fiadoRows = (fiadoData ?? [])
         .filter((s: any) => (Number(s.total) || 0) > 0)
         .map((s: any) => ({
           id: s.id,
           total: Number(s.total) || 0,
           created_at: s.created_at,
-          customer_name: s.customer_name ?? null,
+          // customer puede ser array (join) u objeto según Supabase
+          customer_name: Array.isArray(s.customer)
+            ? (s.customer[0]?.name ?? null)
+            : (s.customer?.name ?? null),
         }))
       setFiado(fiadoRows)
 
@@ -160,10 +164,8 @@ export default function ReportesPage() {
     () => expenses.filter(e => e.date && inRange(e.date, range)),
     [expenses, range]
   )
-  const filteredFiado = useMemo(
-    () => fiado.filter(f => f.created_at && inRange(f.created_at, range)),
-    [fiado, range]
-  )
+  // Fiado: NO filtramos por rango — son deudas vigentes pendientes de cobro
+  const filteredFiado = fiado
 
   // ─── Gross KPIs ──────────────────────────────────────────────────────────────
   const { totalRevenue, totalCogs, grossProfit, grossMargin, totalUnits } = useMemo(() => {
@@ -501,7 +503,7 @@ export default function ReportesPage() {
                     <div className="px-5 py-4 border-b border-stone-100 flex items-center justify-between">
                       <div>
                         <h2 className="text-sm font-semibold text-stone-800">🤝 Por cobrar — Fiado</h2>
-                        <p className="text-xs text-stone-400 mt-0.5">Ventas pendientes de pago · incluidas en el resultado neto</p>
+                        <p className="text-xs text-stone-400 mt-0.5">Todas las ventas fiadas pendientes de cobro (sin filtro de fecha)</p>
                       </div>
                       <span className="text-sm font-bold text-blue-700">{fmt(totalFiado)}</span>
                     </div>
