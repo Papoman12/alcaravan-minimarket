@@ -266,7 +266,14 @@ function DetalleMetodoModal({ methodKey, onClose }: { methodKey: MethodKey; onCl
     const filtered = (allPurch ?? []).filter(p =>
       info.methods.map(m => m.toLowerCase()).includes((p.payment_method ?? '').toLowerCase())
     )
-    setCompras(filtered)
+    // Supabase returns the join as an array; normalize to single object for CompraRow
+    const normalised = filtered.map(p => ({
+      ...p,
+      supplier: Array.isArray(p.supplier)
+        ? ((p.supplier[0] ?? null) as { name: string } | null)
+        : (p.supplier as unknown as { name: string } | null),
+    })) as CompraRow[]
+    setCompras(normalised)
 
     // Gastos — igual, traer todo y filtrar en JS
     const { data: allExp } = await supabase
