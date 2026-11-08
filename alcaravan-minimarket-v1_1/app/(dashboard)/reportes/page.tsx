@@ -63,10 +63,22 @@ export default function ReportesPage() {
   const [items, setItems]           = useState<SaleItemRow[]>([])
   const [purchases, setPurchases]   = useState<PurchaseRow[]>([])
   const [expenses, setExpenses]     = useState<ExpenseRow[]>([])
+  const [fiado, setFiado]           = useState<{id:string; total:number; created_at:string; customer_name:string|null}[]>([])
   const [loading, setLoading]       = useState(true)
   const [range, setRange]           = useState<DateRange>('30d')
   const [tab, setTab]               = useState<Tab>('bruta')
   const [hoveredProduct, setHoveredProduct] = useState<string | null>(null)
+  // IDs de compras excluidas del cálculo neto (inversión inicial, etc.)
+  const [excludedPurchaseIds, setExcludedPurchaseIds] = useState<Set<string>>(new Set())
+
+  const togglePurchase = (id: string) => {
+    setExcludedPurchaseIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   // ─── Load data ───────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -111,6 +123,25 @@ export default function ReportesPage() {
       if (expErr) console.error('expenses:', expErr)
       setExpenses(expData ?? [])
 
+      // 4. Fiado — ventas con payment_method 'credit'/'fiado' o status 'pending'
+      // Intentamos desde sale_payments o desde sales directamente
+      const { data: fiadoData } = await supabase
+        .from('sales')
+        .select('id, total, created_at, customer_name, status, payment_method')
+        .or('payment_method.eq.credit,payment_method.eq.fiado,status.eq.pending')
+        .order('created_at', { ascending: false })
+
+      // Solo tomamos las que tienen monto pendiente de cobro
+      const fiadoRows = (fiadoData ?? [])
+        .filter((s: any) => (Number(s.total) || 0) > 0)
+        .map((s: any) => ({
+          id: s.id,
+          total: Number(s.total) || 0,
+          created_at: s.created_at,
+          customer_name: s.customer_name ?? null,
+        }))
+      setFiado(fiadoRows)
+
       setLoading(false)
     }
     load()
@@ -129,6 +160,10 @@ export default function ReportesPage() {
     () => expenses.filter(e => e.date && inRange(e.date, range)),
     [expenses, range]
   )
+  const filteredFiado = useMemo(
+    () => fiado.filter(f => f.created_at && inRange(f.created_at, range)),
+    [fiado, range]
+  )
 
   // ─── Gross KPIs ──────────────────────────────────────────────────────────────
   const { totalRevenue, totalCogs, grossProfit, grossMargin, totalUnits } = useMemo(() => {
@@ -144,13 +179,18 @@ export default function ReportesPage() {
   }, [filteredItems])
 
   // ─── Net KPIs ────────────────────────────────────────────────────────────────
-  const { totalPurchases, totalExpenses, netProfit, netMargin } = useMemo(() => {
-    const purch = filteredPurchases.reduce((s, p) => s + (Number(p.total) || 0), 0)
-    const exp   = filteredExpenses.reduce((s, e) => s + (Number(e.amount) || 0), 0)
-    const net   = totalRevenue - purch - exp
-    const margin = totalRevenue > 0 ? (net / totalRevenue) * 100 : 0
-    return { totalPurchases: purch, totalExpenses: exp, netProfit: net, netMargin: margin }
-  }, [filteredPurchases, filteredExpenses, totalRevenue])
+  const { totalPurchases, totalPurchasesExcluded, totalExpenses, totalFiado, netProfit, netMargin } = useMemo(() => {
+    const activePurch = filteredPurchases.filter(p => !excludedPurchaseIds.has(p.id))
+    const purch    = activePurch.reduce((s, p) => s + (Number(p.total) || 0), 0)
+    const excluded = filteredPurchases.filter(p => excludedPurchaseIds.has(p.id))
+                       .reduce((s, p) => s + (Number(p.total) || 0), 0)
+    const exp      = filteredExpenses.reduce((s, e) => s + (Number(e.amount) || 0), 0)
+    const fdo      = filteredFiado.reduce((s, f) => s + f.total, 0)
+    // Net = ventas cobradas + fiado pendiente − compras activas − gastos
+    const net      = totalRevenue + fdo - purch - exp
+    const margin   = (totalRevenue + fdo) > 0 ? (net / (totalRevenue + fdo)) * 100 : 0
+    return { totalPurchases: purch, totalPurchasesExcluded: excluded, totalExpenses: exp, totalFiado: fdo, netProfit: net, netMargin: margin }
+  }, [filteredPurchases, filteredExpenses, filteredFiado, totalRevenue, excludedPurchaseIds])
 
   // ─── Top products (gross) ────────────────────────────────────────────────────
   const allProducts = useMemo(() => {
@@ -379,10 +419,13 @@ export default function ReportesPage() {
             {tab === 'neta' && (
               <>
                 {/* KPI Cards — net waterfall */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <KpiCard label="Ingresos ventas"  value={fmt(totalRevenue)}   sub={`${totalUnits.toLocaleString('es-CO')} uds`} color="blue"                              icon="💰" />
-                  <KpiCard label="Pagos a proveed."  value={fmt(totalPurchases)} sub={`${filteredPurchases.length} compras`}       color="orange"                             icon="🏭" />
-                  <KpiCard label="Gastos operativos" value={fmt(totalExpenses)}  sub={`${filteredExpenses.length} gastos`}         color="yellow"                             icon="💸" />
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <KpiCard label="Ingresos ventas"  value={fmt(totalRevenue)}   sub={`${totalUnits.toLocaleString('es-CO')} uds cobradas`}            color="blue"   icon="💰" />
+                  <KpiCard label="Por cobrar (fiado)" value={fmt(totalFiado)}   sub={`${filteredFiado.length} venta${filteredFiado.length !== 1 ? 's' : ''} pendientes`} color={totalFiado > 0 ? 'yellow' : 'blue'} icon="🤝" />
+                  <KpiCard label="Pagos a proveed."  value={fmt(totalPurchases)} sub={`${filteredPurchases.filter(p => !excludedPurchaseIds.has(p.id)).length} compras incluidas`} color="orange" icon="🏭" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <KpiCard label="Gastos operativos" value={fmt(totalExpenses)}  sub={`${filteredExpenses.length} gastos`} color="yellow" icon="💸" />
                   <KpiCard
                     label="Resultado neto"
                     value={fmt(netProfit)}
@@ -398,25 +441,32 @@ export default function ReportesPage() {
                     <h2 className="text-sm font-semibold text-stone-800">Resumen del período · {RANGE_LABELS[range]}</h2>
                   </div>
                   <div className="px-5 py-5 space-y-3">
-                    {/* Row helper */}
-                    {[
-                      { label: '(+) Ingresos por ventas',          value: totalRevenue,   color: '#1baf7a', sign: '+' },
-                      { label: '(−) Pagos a proveedores (compras)', value: totalPurchases, color: '#eb6834', sign: '−' },
-                      { label: '(−) Gastos operativos',             value: totalExpenses,  color: '#eda100', sign: '−' },
-                    ].map(row => {
-                      const barPct = totalRevenue > 0 ? (row.value / totalRevenue) * 100 : 0
-                      return (
-                        <div key={row.label}>
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs text-stone-600">{row.label}</span>
-                            <span className="text-xs font-semibold text-stone-800">{row.sign} {fmt(row.value)}</span>
+                    {(() => {
+                      const base = totalRevenue + totalFiado
+                      const rows = [
+                        { label: '(+) Ingresos cobrados',              value: totalRevenue,   color: '#1baf7a', sign: '+', note: '' },
+                        ...(totalFiado > 0 ? [{ label: '(+) Por cobrar — fiado',  value: totalFiado,     color: '#2a78d6', sign: '+', note: `${filteredFiado.length} ventas pendientes` }] : []),
+                        { label: '(−) Pagos a proveedores',            value: totalPurchases, color: '#eb6834', sign: '−', note: excludedPurchaseIds.size > 0 ? `${excludedPurchaseIds.size} excluidas (inv. inicial)` : '' },
+                        { label: '(−) Gastos operativos',              value: totalExpenses,  color: '#eda100', sign: '−', note: '' },
+                      ]
+                      return rows.map(row => {
+                        const barPct = base > 0 ? (row.value / base) * 100 : 0
+                        return (
+                          <div key={row.label}>
+                            <div className="flex items-center justify-between mb-1">
+                              <div>
+                                <span className="text-xs text-stone-600">{row.label}</span>
+                                {row.note && <span className="ml-2 text-[10px] text-stone-400">({row.note})</span>}
+                              </div>
+                              <span className="text-xs font-semibold text-stone-800">{row.sign} {fmt(row.value)}</span>
+                            </div>
+                            <div className="h-4 bg-stone-100 rounded overflow-hidden">
+                              <div className="h-full rounded" style={{ width: `${Math.min(barPct, 100)}%`, backgroundColor: row.color }} />
+                            </div>
                           </div>
-                          <div className="h-4 bg-stone-100 rounded overflow-hidden">
-                            <div className="h-full rounded" style={{ width: `${Math.min(barPct, 100)}%`, backgroundColor: row.color }} />
-                          </div>
-                        </div>
-                      )
-                    })}
+                        )
+                      })
+                    })()}
                     {/* Divider + result */}
                     <div className="border-t-2 border-stone-200 pt-3 flex items-center justify-between">
                       <span className="text-sm font-bold text-stone-800">= Resultado neto</span>
@@ -445,34 +495,94 @@ export default function ReportesPage() {
                   </div>
                 )}
 
-                {/* Purchases list */}
-                {filteredPurchases.length > 0 && (
+                {/* Fiado list */}
+                {filteredFiado.length > 0 && (
                   <div className="bg-white rounded-xl border border-stone-200 overflow-hidden">
                     <div className="px-5 py-4 border-b border-stone-100 flex items-center justify-between">
-                      <h2 className="text-sm font-semibold text-stone-800">Compras del período</h2>
-                      <span className="text-xs text-stone-400">{filteredPurchases.length} compras · {fmt(totalPurchases)}</span>
+                      <div>
+                        <h2 className="text-sm font-semibold text-stone-800">🤝 Por cobrar — Fiado</h2>
+                        <p className="text-xs text-stone-400 mt-0.5">Ventas pendientes de pago · incluidas en el resultado neto</p>
+                      </div>
+                      <span className="text-sm font-bold text-blue-700">{fmt(totalFiado)}</span>
+                    </div>
+                    <div className="divide-y divide-stone-50">
+                      {filteredFiado.map(f => (
+                        <div key={f.id} className="flex items-center justify-between px-5 py-3 hover:bg-stone-50">
+                          <div>
+                            <p className="text-sm text-stone-700 font-medium">{f.customer_name ?? 'Cliente sin nombre'}</p>
+                            <p className="text-xs text-stone-400">
+                              {new Date(f.created_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}
+                            </p>
+                          </div>
+                          <span className="text-sm font-semibold text-blue-700">{fmt(f.total)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Purchases list with exclusion checkboxes */}
+                {filteredPurchases.length > 0 && (
+                  <div className="bg-white rounded-xl border border-stone-200 overflow-hidden">
+                    <div className="px-5 py-4 border-b border-stone-100">
+                      <div className="flex items-center justify-between">
+                        <h2 className="text-sm font-semibold text-stone-800">Compras del período</h2>
+                        <span className="text-xs text-stone-400">{filteredPurchases.length} compras</span>
+                      </div>
+                      <p className="text-xs text-stone-400 mt-1">
+                        ☑️ Desmarca las que fueron <strong>inversión inicial</strong> para excluirlas del cálculo neto.
+                        {excludedPurchaseIds.size > 0 && (
+                          <span className="ml-2 text-amber-600 font-medium">
+                            {excludedPurchaseIds.size} excluida{excludedPurchaseIds.size > 1 ? 's' : ''} · {fmt(totalPurchasesExcluded)} no contabilizados
+                          </span>
+                        )}
+                      </p>
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs">
                         <thead>
                           <tr className="border-b border-stone-100 bg-stone-50">
-                            <th className="text-left px-5 py-2.5 font-medium text-stone-500">Proveedor / Ref</th>
+                            <th className="px-4 py-2.5 w-8"></th>
+                            <th className="text-left px-3 py-2.5 font-medium text-stone-500">Proveedor / Ref</th>
                             <th className="text-left px-4 py-2.5 font-medium text-stone-500">Fecha</th>
                             <th className="text-right px-5 py-2.5 font-medium text-stone-500">Total</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {filteredPurchases.map((p, i) => (
-                            <tr key={p.id} className={`border-b border-stone-50 hover:bg-stone-50 ${i % 2 ? 'bg-stone-50/40' : ''}`}>
-                              <td className="px-5 py-2.5 text-stone-700 max-w-[200px] truncate">
-                                {p.supplier?.name ?? p.purchase_number ?? '—'}
-                              </td>
-                              <td className="px-4 py-2.5 text-stone-500">
-                                {new Date(p.created_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })}
-                              </td>
-                              <td className="px-5 py-2.5 text-right font-medium text-stone-800">{fmt(Number(p.total) || 0)}</td>
-                            </tr>
-                          ))}
+                          {filteredPurchases.map((p, i) => {
+                            const excluded = excludedPurchaseIds.has(p.id)
+                            return (
+                              <tr
+                                key={p.id}
+                                className={`border-b border-stone-50 hover:bg-stone-50 cursor-pointer transition-colors ${
+                                  excluded ? 'bg-amber-50/60 opacity-60' : i % 2 ? 'bg-stone-50/40' : ''
+                                }`}
+                                onClick={() => togglePurchase(p.id)}
+                              >
+                                <td className="px-4 py-2.5 text-center">
+                                  <input
+                                    type="checkbox"
+                                    checked={!excluded}
+                                    onChange={() => togglePurchase(p.id)}
+                                    onClick={e => e.stopPropagation()}
+                                    className="w-3.5 h-3.5 accent-stone-700"
+                                  />
+                                </td>
+                                <td className="px-3 py-2.5 max-w-[180px]">
+                                  <span className={`font-medium ${excluded ? 'line-through text-stone-400' : 'text-stone-700'}`}>
+                                    {p.supplier?.name ?? p.purchase_number ?? '—'}
+                                  </span>
+                                  {excluded && <span className="ml-2 text-[10px] text-amber-600 font-semibold">INVERSIÓN INICIAL</span>}
+                                </td>
+                                <td className="px-4 py-2.5 text-stone-500">
+                                  {new Date(p.created_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })}
+                                </td>
+                                <td className={`px-5 py-2.5 text-right font-medium ${excluded ? 'text-stone-400 line-through' : 'text-stone-800'}`}>
+                                  {fmt(Number(p.total) || 0)}
+                                </td>
+                              </tr>
+                            )
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -480,8 +590,8 @@ export default function ReportesPage() {
                 )}
 
                 <p className="text-xs text-stone-400 text-center pb-2">
-                  💡 Resultado neto = Ingresos de ventas − Pagos a proveedores − Gastos operativos del período.
-                  No incluye depreciación ni ajustes de inventario.
+                  💡 Resultado neto = Ingresos cobrados + Fiado por cobrar − Compras incluidas − Gastos operativos.<br/>
+                  Desmarca las compras de <strong>inversión inicial</strong> para excluirlas. No incluye depreciación ni ajustes de inventario.
                 </p>
               </>
             )}
