@@ -73,7 +73,7 @@ function ReceiptModal({ receipt, onClose }: { receipt: ReceiptData; onClose: () 
 <meta charset="UTF-8">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Courier New',Courier,monospace;font-size:11px;width:80mm;padding:2mm 2mm 4mm;color:#000;line-height:1.3}
+body{font-family:'Courier New',Courier,monospace;font-size:11px;width:80mm;padding:2mm 2mm 50mm;color:#000;line-height:1.3}
 .c{text-align:center}
 .store{font-size:17px;font-weight:900;letter-spacing:2px;padding:3px 0 1px}
 .sub{font-size:9px;letter-spacing:1px;color:#444}
@@ -113,7 +113,6 @@ ${changeAmt > 0 ? `<div class="cam"><span>CAMBIO</span><span>${formatCurrency(ch
 ${receipt.notes ? `<hr class="sep"><div class="c meta">${receipt.notes}</div>` : ''}
 <hr class="sep">
 <div class="c foot">¡Gracias por su compra! — Alcaraván</div>
-<div style="height:15mm"></div>
 </body></html>`
 
     // Crear iframe EN el viewport pero invisible (off-screen impide el layout en algunos navegadores)
