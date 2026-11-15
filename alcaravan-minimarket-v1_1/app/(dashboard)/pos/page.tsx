@@ -45,95 +45,95 @@ function ReceiptModal({ receipt, onClose }: { receipt: ReceiptData; onClose: () 
   }
 
   function handlePrint() {
-    const w = window.open('', '_blank', 'width=320')
-    if (!w) { window.print(); return }
-    const cashPay = receipt.payments.find((p) => p.method === 'cash')
+    const cashPay   = receipt.payments.find((p) => p.method === 'cash')
     const changeAmt = cashPay?.received ? cashPay.received - cashPay.amount : 0
-    const dateStr = receipt.date.toLocaleDateString('es-CO', { day:'2-digit', month:'short', year:'numeric' })
-    const timeStr = receipt.date.toLocaleTimeString('es-CO', { hour:'2-digit', minute:'2-digit' })
+    const dateStr   = receipt.date.toLocaleDateString('es-CO', { day:'2-digit', month:'short', year:'numeric' })
+    const timeStr   = receipt.date.toLocaleTimeString('es-CO', { hour:'2-digit', minute:'2-digit' })
 
     const itemsHtml = receipt.items.map(i => {
-      const detail = i.quantity > 1
-        ? `<div class="item-detail">${i.quantity} &times; ${formatCurrency(i.unit_price)}<span>${formatCurrency(i.total)}</span></div>`
-        : `<div class="item-detail"><span></span><span>${formatCurrency(i.total)}</span></div>`
-      return `<div class="item"><div class="item-name">${i.product_name}</div>${detail}</div>`
+      const det = i.quantity > 1
+        ? `<div class="rcp-idet">${i.quantity} &times; ${formatCurrency(i.unit_price)}<span>${formatCurrency(i.total)}</span></div>`
+        : `<div class="rcp-idet"><span></span><span>${formatCurrency(i.total)}</span></div>`
+      return `<div class="rcp-item"><div class="rcp-iname">${i.product_name}</div>${det}</div>`
     }).join('')
 
     const paymentsHtml = receipt.payments.map(p =>
-      `<div class="row"><span>${PAYMENT_LABELS[p.method] ?? p.method}</span><span>${formatCurrency(p.amount)}</span></div>`
+      `<div class="rcp-row"><span>${PAYMENT_LABELS[p.method] ?? p.method}</span><span>${formatCurrency(p.amount)}</span></div>`
     ).join('')
 
-    w.document.write(`<!DOCTYPE html><html><head>
-      <meta charset="UTF-8">
-      <style>
+    // ── Inyectar el ticket en la página actual y llamar window.print() ──
+    // Así @page funciona correctamente (Chrome ignora @page en ventanas nuevas)
+
+    // 1. Estilos de impresión
+    const styleEl = document.createElement('style')
+    styleEl.id = '__rcp_style__'
+    styleEl.textContent = `
+      @media print {
         @page { size: 80mm auto; margin: 0; }
-        html { height: auto; }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
+        body > *:not(#__rcp__) { display: none !important; }
+        #__rcp__ {
+          display: block !important;
           font-family: 'Courier New', Courier, monospace;
           font-size: 11px;
           width: 76mm;
-          margin: 0 auto;
+          margin: 0;
           padding: 2mm;
-          color: #000;
+          color: #000 !important;
           line-height: 1.25;
-          height: auto;
-          overflow: hidden;
         }
-        .c { text-align: center; }
-        .store { font-size: 17px; font-weight: 900; letter-spacing: 2px; padding: 3px 0 1px; }
-        .store-sub { font-size: 9px; letter-spacing: 1px; color: #444; }
-        .sep { border: none; border-top: 1px dashed #555; margin: 3px 0; }
-        .sep2 { border: none; border-top: 2px solid #000; margin: 3px 0; }
-        .meta { font-size: 9px; color: #555; }
-        .num { font-size: 10px; font-weight: bold; padding: 1px 0; }
-        .item { padding: 2px 0; }
-        .iname { font-size: 10px; font-weight: bold; word-break: break-word; }
-        .idet { display:flex; justify-content:space-between; font-size:9px; color:#444; padding-left:4px; }
-        .row { display:flex; justify-content:space-between; font-size:10px; padding: 1px 0; }
-        .muted { color:#666; }
-        .big { display:flex; justify-content:space-between; font-size:14px; font-weight:900; padding:2px 0; }
-        .cambio { display:flex; justify-content:space-between; font-size:12px; font-weight:bold; background:#000; color:#fff; padding:2px 4px; margin:2px 0; }
-        .foot { font-size:9px; color:#666; padding:2px 0; }
-      </style>
-    </head><body>
-      <div class="c">
-        <div class="store">ALCARAV&Aacute;N</div>
-        <div class="store-sub">MINIMARKET &amp; CAF&Eacute;</div>
-        <hr class="sep">
-        <div class="meta">${dateStr} ${timeStr} &nbsp; <b>${receipt.saleNumber}</b></div>
-        ${receipt.customerName ? `<div class="meta">Cliente: <b>${receipt.customerName}</b></div>` : ''}
+        .rcp-c    { text-align: center; }
+        .rcp-store{ font-size:17px; font-weight:900; letter-spacing:2px; padding:3px 0 1px; }
+        .rcp-sub  { font-size:9px; letter-spacing:1px; color:#444; }
+        .rcp-sep  { border:none; border-top:1px dashed #555; margin:3px 0; }
+        .rcp-sep2 { border:none; border-top:2px solid #000; margin:3px 0; }
+        .rcp-meta { font-size:9px; color:#555; }
+        .rcp-item { padding:2px 0; }
+        .rcp-iname{ font-size:10px; font-weight:bold; word-break:break-word; }
+        .rcp-idet { display:flex; justify-content:space-between; font-size:9px; color:#444; padding-left:4px; }
+        .rcp-row  { display:flex; justify-content:space-between; font-size:10px; padding:1px 0; }
+        .rcp-muted{ color:#666; }
+        .rcp-big  { display:flex; justify-content:space-between; font-size:14px; font-weight:900; padding:2px 0; }
+        .rcp-cam  { display:flex; justify-content:space-between; font-size:12px; font-weight:bold; background:#000; color:#fff; padding:2px 4px; margin:2px 0; }
+        .rcp-foot { font-size:9px; color:#666; padding:2px 0; }
+      }
+    `
+    document.head.appendChild(styleEl)
+
+    // 2. Contenido del ticket
+    const div = document.createElement('div')
+    div.id = '__rcp__'
+    div.style.display = 'none'
+    div.innerHTML = `
+      <div class="rcp-c">
+        <div class="rcp-store">ALCARAVÁN</div>
+        <div class="rcp-sub">MINIMARKET &amp; CAFÉ</div>
+        <hr class="rcp-sep">
+        <div class="rcp-meta">${dateStr} ${timeStr} &nbsp; <b>${receipt.saleNumber}</b></div>
+        ${receipt.customerName ? `<div class="rcp-meta">Cliente: <b>${receipt.customerName}</b></div>` : ''}
       </div>
-      <hr class="sep">
+      <hr class="rcp-sep">
       ${itemsHtml}
-      <hr class="sep">
-      ${receipt.subtotal !== receipt.total || receipt.discount > 0 || receipt.tax > 0 ? `<div class="row muted"><span>Subtotal</span><span>${formatCurrency(receipt.subtotal)}</span></div>` : ''}
-      ${receipt.discount > 0 ? `<div class="row muted"><span>Descuento</span><span>&minus;${formatCurrency(receipt.discount)}</span></div>` : ''}
-      ${receipt.tax > 0 ? `<div class="row muted"><span>IVA</span><span>${formatCurrency(receipt.tax)}</span></div>` : ''}
-      ${receipt.cardCommission && receipt.cardCommission > 0 ? `<div class="row muted"><span>Comisi&oacute;n tarjeta 2.5%</span><span>+${formatCurrency(receipt.cardCommission)}</span></div>` : ''}
-      <hr class="sep2">
-      <div class="big"><span>TOTAL</span><span>${formatCurrency(receipt.total + (receipt.cardCommission ?? 0))}</span></div>
-      <hr class="sep">
+      <hr class="rcp-sep">
+      ${receipt.subtotal !== receipt.total || receipt.discount > 0 || receipt.tax > 0 ? `<div class="rcp-row rcp-muted"><span>Subtotal</span><span>${formatCurrency(receipt.subtotal)}</span></div>` : ''}
+      ${receipt.discount > 0 ? `<div class="rcp-row rcp-muted"><span>Descuento</span><span>&minus;${formatCurrency(receipt.discount)}</span></div>` : ''}
+      ${receipt.tax > 0 ? `<div class="rcp-row rcp-muted"><span>IVA</span><span>${formatCurrency(receipt.tax)}</span></div>` : ''}
+      ${receipt.cardCommission && receipt.cardCommission > 0 ? `<div class="rcp-row rcp-muted"><span>Comisión tarjeta 2.5%</span><span>+${formatCurrency(receipt.cardCommission)}</span></div>` : ''}
+      <hr class="rcp-sep2">
+      <div class="rcp-big"><span>TOTAL</span><span>${formatCurrency(receipt.total + (receipt.cardCommission ?? 0))}</span></div>
+      <hr class="rcp-sep">
       ${paymentsHtml}
-      ${cashPay?.received && cashPay.received > 0 ? `<div class="row muted"><span>Recibido</span><span>${formatCurrency(cashPay.received)}</span></div>` : ''}
-      ${changeAmt > 0 ? `<div class="cambio"><span>CAMBIO</span><span>${formatCurrency(changeAmt)}</span></div>` : ''}
-      ${receipt.notes ? `<hr class="sep"><div class="c meta">${receipt.notes}</div>` : ''}
-      <hr class="sep">
-      <div class="c foot">&#161;Gracias por su compra! &mdash; Alcarav&aacute;n</div>
-      <div style="height:8mm"></div>
-    </body></html>`)
-    w.document.close()
-    w.focus()
-    // Esperar a que el contenido renderice, medir la altura real
-    // e inyectar @page con esa altura exacta para que la térmica
-    // no imprima papel en blanco después del contenido
-    setTimeout(() => {
-      const h = w.document.documentElement.scrollHeight || w.document.body.scrollHeight
-      const s = w.document.createElement('style')
-      s.textContent = `@page { size: 80mm ${h}px !important; margin: 0; }`
-      w.document.head.appendChild(s)
-      setTimeout(() => { w.print(); w.close() }, 150)
-    }, 450)
+      ${cashPay?.received && cashPay.received > 0 ? `<div class="rcp-row rcp-muted"><span>Recibido</span><span>${formatCurrency(cashPay.received)}</span></div>` : ''}
+      ${changeAmt > 0 ? `<div class="rcp-cam"><span>CAMBIO</span><span>${formatCurrency(changeAmt)}</span></div>` : ''}
+      ${receipt.notes ? `<hr class="rcp-sep"><div class="rcp-c rcp-meta">${receipt.notes}</div>` : ''}
+      <hr class="rcp-sep">
+      <div class="rcp-c rcp-foot">¡Gracias por su compra! — Alcaraván</div>
+    `
+    document.body.appendChild(div)
+
+    // 3. Imprimir y limpiar
+    window.print()
+    document.head.removeChild(styleEl)
+    document.body.removeChild(div)
   }
 
   return (
