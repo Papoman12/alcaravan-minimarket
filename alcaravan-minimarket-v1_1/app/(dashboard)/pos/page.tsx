@@ -124,7 +124,16 @@ function ReceiptModal({ receipt, onClose }: { receipt: ReceiptData; onClose: () 
     </body></html>`)
     w.document.close()
     w.focus()
-    setTimeout(() => { w.print(); w.close() }, 400)
+    // Esperar a que el contenido renderice, medir la altura real
+    // e inyectar @page con esa altura exacta para que la térmica
+    // no imprima papel en blanco después del contenido
+    setTimeout(() => {
+      const h = w.document.documentElement.scrollHeight || w.document.body.scrollHeight
+      const s = w.document.createElement('style')
+      s.textContent = `@page { size: 80mm ${h}px !important; margin: 0; }`
+      w.document.head.appendChild(s)
+      setTimeout(() => { w.print(); w.close() }, 150)
+    }, 450)
   }
 
   return (
