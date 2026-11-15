@@ -136,9 +136,10 @@ ${receipt.notes ? `<hr class="sep"><div class="c meta">${receipt.notes}</div>` :
         bodyEl.offsetHeight,
         iframeDoc.documentElement.scrollHeight
       )
-      // 1 CSS px = 25.4/96 mm ≈ 0.2646 mm
-      // +25mm de buffer para compensar diferencias entre renderizado de pantalla y de impresora
-      const heightMm = Math.ceil(heightPx * 0.2646) + 25
+      // Multiplicador 0.40 (en vez del teórico 0.2646) compensa que Chrome
+      // renderiza las fuentes más grandes al imprimir que en pantalla.
+      // +30mm de margen de corte al final.
+      const heightMm = Math.ceil(heightPx * 0.40) + 30
 
       const pgStyle = iframeDoc.createElement('style')
       pgStyle.textContent = `@page { size: 80mm ${heightMm}mm; margin: 0; }`
