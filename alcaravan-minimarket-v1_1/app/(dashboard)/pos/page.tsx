@@ -62,14 +62,14 @@ function ReceiptModal({ receipt, onClose }: { receipt: ReceiptData; onClose: () 
     ).join('')
 
     // ── Inyectar el ticket en la página actual y llamar window.print() ──
-    // Así @page funciona correctamente (Chrome ignora @page en ventanas nuevas)
+    // @page DEBE estar fuera de @media print (es CSS no estándar dentro)
 
     // 1. Estilos de impresión
     const styleEl = document.createElement('style')
     styleEl.id = '__rcp_style__'
     styleEl.textContent = `
+      @page { size: 80mm auto; margin: 0; }
       @media print {
-        @page { size: 80mm auto; margin: 0; }
         body > *:not(#__rcp__) { display: none !important; }
         #__rcp__ {
           display: block !important;
@@ -130,10 +130,18 @@ function ReceiptModal({ receipt, onClose }: { receipt: ReceiptData; onClose: () 
     `
     document.body.appendChild(div)
 
-    // 3. Imprimir y limpiar
+    // 3. Imprimir — limpiar DESPUÉS de que el diálogo cierre
+    function cleanup() {
+      const s = document.getElementById('__rcp_style__')
+      const d = document.getElementById('__rcp__')
+      if (s) document.head.removeChild(s)
+      if (d) document.body.removeChild(d)
+      window.onafterprint = null
+    }
+    window.onafterprint = cleanup
     window.print()
-    document.head.removeChild(styleEl)
-    document.body.removeChild(div)
+    // Fallback por si onafterprint no dispara (algunos navegadores)
+    setTimeout(cleanup, 3000)
   }
 
   return (
