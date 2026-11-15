@@ -129,20 +129,13 @@ ${receipt.notes ? `<hr class="sep"><div class="c meta">${receipt.notes}</div>` :
 
     // 800ms: tiempo suficiente para que Courier New cargue y el layout se calcule
     setTimeout(() => {
-      const bodyEl = iframeDoc.body
-      // Usar el mayor de scrollHeight / offsetHeight para no quedar cortos
-      const heightPx = Math.max(
-        bodyEl.scrollHeight,
-        bodyEl.offsetHeight,
-        iframeDoc.documentElement.scrollHeight
-      )
-      // Multiplicador 0.40 (en vez del teórico 0.2646) compensa que Chrome
-      // renderiza las fuentes más grandes al imprimir que en pantalla.
-      // +30mm de margen de corte al final.
-      const heightMm = Math.ceil(heightPx * 0.40) + 30
-
+      // Usar 297mm fijo (el papel configurado en Windows).
+      // La impresora térmica tiene corte automático: corta después del último
+      // carácter impreso sin importar que el "papel" tenga 297mm de largo.
+      // No calcular altura dinámica — ninguna medición de pantalla es exacta
+      // para el motor de impresión de Chrome, y causa cortes en medio del ticket.
       const pgStyle = iframeDoc.createElement('style')
-      pgStyle.textContent = `@page { size: 80mm ${heightMm}mm; margin: 0; }`
+      pgStyle.textContent = `@page { size: 80mm 297mm; margin: 0; }`
       iframeDoc.head.appendChild(pgStyle)
 
       const iframeWin = iframe.contentWindow!
