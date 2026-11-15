@@ -20,6 +20,7 @@ interface ReceiptData {
   discount: number
   tax: number
   total: number
+  cardCommission?: number
   payments: CartPayment[]
   customerName?: string
   notes?: string
@@ -44,70 +45,112 @@ function ReceiptModal({ receipt, onClose }: { receipt: ReceiptData; onClose: () 
   }
 
   function handlePrint() {
-    const w = window.open('', '_blank', 'width=400,height=700')
+    const w = window.open('', '_blank', 'width=320,height=600')
     if (!w) { window.print(); return }
-    const cashPayment = receipt.payments.find((p) => p.method === 'cash')
-    const changeAmt = cashPayment?.received ? cashPayment.received - cashPayment.amount : 0
-    const itemsHtml = receipt.items.map(i => `<tr>
-      <td style="padding:3px 0">${i.product_name}</td>
-      <td style="text-align:center;padding:3px 4px">${i.quantity}</td>
-      <td style="text-align:right;padding:3px 0">${formatCurrency(i.total)}</td>
-    </tr>`).join('')
-    const paymentsHtml = receipt.payments.map(p => `<div style="display:flex;justify-content:space-between;font-size:11px">
-      <span>${PAYMENT_LABELS[p.method] ?? p.method}</span><span>${formatCurrency(p.amount)}</span>
-    </div>`).join('')
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><style>
-      @page{margin:2mm}
-      body{font-family:Arial,sans-serif;font-size:11px;width:70mm;margin:0 auto;padding:6px;color:#000}
-      h2{text-align:center;margin:4px 0;font-size:15px;font-weight:bold}
-      .sub{text-align:center;font-size:10px;color:#444;margin-bottom:6px}
-      hr{border:none;border-top:1px dashed #999;margin:5px 0}
-      table{width:100%;border-collapse:collapse;font-size:10px}
-      th{font-size:10px;font-weight:bold;padding:3px 2px;border-bottom:1px dashed #999}
-      th.prod{text-align:left;width:60%}
-      th.qty{text-align:center;width:15%}
-      th.price{text-align:right;width:25%}
-      td.prod{text-align:left;padding:3px 2px;word-break:break-word}
-      td.qty{text-align:center;padding:3px 2px}
-      td.price{text-align:right;padding:3px 2px}
-      .totrow{display:table;width:100%;font-size:10px;margin:2px 0}
-      .totrow span:first-child{display:table-cell;text-align:left}
-      .totrow span:last-child{display:table-cell;text-align:right}
-      .grandtotal{display:table;width:100%;font-size:13px;font-weight:bold;margin-top:4px}
-      .grandtotal span:first-child{display:table-cell;text-align:left}
-      .grandtotal span:last-child{display:table-cell;text-align:right}
-      .cambio{display:table;width:100%;font-size:12px;font-weight:bold}
-      .cambio span:first-child{display:table-cell;text-align:left}
-      .cambio span:last-child{display:table-cell;text-align:right}
-      .footer{text-align:center;margin-top:8px;font-size:9px;color:#666}
-    </style></head><body>
-      <h2>Alcarav&aacute;n</h2>
-      <div class="sub">Minimarket - Caf&eacute;<br>
-      ${receipt.date.toLocaleString('es-CO')}<br><b>${receipt.saleNumber}</b></div>
-      ${receipt.customerName ? `<div style="font-size:10px;margin-bottom:4px">Cliente: <b>${receipt.customerName}</b></div>` : ''}
-      <table>
-        <thead><tr><th class="prod">Producto</th><th class="qty">Cant</th><th class="price">Total</th></tr></thead>
-        <tbody>
-          ${receipt.items.map(i => `<tr>
-            <td class="prod">${i.product_name}</td>
-            <td class="qty">${i.quantity}</td>
-            <td class="price">${formatCurrency(i.total)}</td>
-          </tr>`).join('')}
-        </tbody>
-      </table>
-      <hr>
-      <div class="totrow"><span>Subtotal</span><span>${formatCurrency(receipt.subtotal)}</span></div>
-      ${receipt.discount > 0 ? `<div class="totrow"><span>Descuento</span><span>-${formatCurrency(receipt.discount)}</span></div>` : ''}
-      ${receipt.tax > 0 ? `<div class="totrow"><span>IVA</span><span>${formatCurrency(receipt.tax)}</span></div>` : ''}
-      <div class="grandtotal"><span>TOTAL</span><span>${formatCurrency(receipt.total)}</span></div>
-      <hr>
-      ${receipt.payments.map(p => `<div class="totrow"><span>${PAYMENT_LABELS[p.method] ?? p.method}</span><span>${formatCurrency(p.amount)}</span></div>`).join('')}
-      ${changeAmt > 0 ? `<div class="totrow"><span>Recibido</span><span>${formatCurrency(cashPayment?.received ?? 0)}</span></div><div class="cambio"><span>Cambio</span><span>${formatCurrency(changeAmt)}</span></div>` : ''}
-      <div class="footer">&#161;Gracias por su compra!</div>
+    const cashPay = receipt.payments.find((p) => p.method === 'cash')
+    const changeAmt = cashPay?.received ? cashPay.received - cashPay.amount : 0
+    const dateStr = receipt.date.toLocaleDateString('es-CO', { day:'2-digit', month:'short', year:'numeric' })
+    const timeStr = receipt.date.toLocaleTimeString('es-CO', { hour:'2-digit', minute:'2-digit' })
+
+    const itemsHtml = receipt.items.map(i => {
+      const detail = i.quantity > 1
+        ? `<div class="item-detail">${i.quantity} &times; ${formatCurrency(i.unit_price)}<span>${formatCurrency(i.total)}</span></div>`
+        : `<div class="item-detail"><span></span><span>${formatCurrency(i.total)}</span></div>`
+      return `<div class="item"><div class="item-name">${i.product_name}</div>${detail}</div>`
+    }).join('')
+
+    const paymentsHtml = receipt.payments.map(p =>
+      `<div class="row"><span>${PAYMENT_LABELS[p.method] ?? p.method}</span><span>${formatCurrency(p.amount)}</span></div>`
+    ).join('')
+
+    w.document.write(`<!DOCTYPE html><html><head>
+      <meta charset="UTF-8">
+      <style>
+        @page { margin: 4mm 2mm; size: 80mm auto; }
+        * { box-sizing: border-box; }
+        body {
+          font-family: 'Courier New', Courier, monospace;
+          font-size: 12px;
+          width: 76mm;
+          margin: 0 auto;
+          padding: 2px;
+          color: #000;
+          line-height: 1.45;
+        }
+        .center { text-align: center; }
+        .store { font-size: 22px; font-weight: 900; letter-spacing: 3px; margin: 6px 0 2px; }
+        .store-sub { font-size: 10px; letter-spacing: 1px; color: #444; }
+        .sep { border: none; border-top: 1px dashed #333; margin: 7px 0; }
+        .sep-solid { border: none; border-top: 2px solid #000; margin: 7px 0; }
+        .meta { font-size: 10px; color: #555; margin: 2px 0; }
+        .sale-num { font-size: 11px; font-weight: bold; margin: 3px 0; }
+        .item { margin: 5px 0; }
+        .item-name { font-size: 11px; font-weight: bold; word-break: break-word; }
+        .item-detail {
+          display: flex;
+          justify-content: space-between;
+          font-size: 10px;
+          color: #444;
+          padding-left: 6px;
+        }
+        .row {
+          display: flex;
+          justify-content: space-between;
+          font-size: 11px;
+          margin: 3px 0;
+        }
+        .row-muted { color: #555; }
+        .total-row {
+          display: flex;
+          justify-content: space-between;
+          font-size: 15px;
+          font-weight: 900;
+          margin: 4px 0 2px;
+        }
+        .cambio-row {
+          display: flex;
+          justify-content: space-between;
+          font-size: 13px;
+          font-weight: bold;
+          background: #000;
+          color: #fff;
+          padding: 3px 4px;
+          margin-top: 4px;
+        }
+        .footer { font-size: 10px; color: #666; margin: 4px 0 2px; }
+      </style>
+    </head><body>
+      <div class="center">
+        <div class="store">ALCARAV&Aacute;N</div>
+        <div class="store-sub">&#9830; MINIMARKET &amp; CAF&Eacute; &#9830;</div>
+        <hr class="sep">
+        <div class="meta">${dateStr} &nbsp; ${timeStr}</div>
+        <div class="sale-num">${receipt.saleNumber}</div>
+        ${receipt.customerName ? `<div class="meta">Cliente: <b>${receipt.customerName}</b></div>` : ''}
+      </div>
+      <hr class="sep">
+      ${itemsHtml}
+      <hr class="sep">
+      ${receipt.subtotal !== receipt.total || receipt.discount > 0 || receipt.tax > 0 ? `<div class="row row-muted"><span>Subtotal</span><span>${formatCurrency(receipt.subtotal)}</span></div>` : ''}
+      ${receipt.discount > 0 ? `<div class="row row-muted"><span>Descuento</span><span>&minus; ${formatCurrency(receipt.discount)}</span></div>` : ''}
+      ${receipt.tax > 0 ? `<div class="row row-muted"><span>IVA</span><span>${formatCurrency(receipt.tax)}</span></div>` : ''}
+      ${receipt.cardCommission && receipt.cardCommission > 0 ? `<div class="row row-muted"><span>Comisi&oacute;n tarjeta (2.5%)</span><span>+ ${formatCurrency(receipt.cardCommission)}</span></div>` : ''}
+      <hr class="sep-solid">
+      <div class="total-row"><span>TOTAL</span><span>${formatCurrency(receipt.total + (receipt.cardCommission ?? 0))}</span></div>
+      <hr class="sep">
+      ${paymentsHtml}
+      ${cashPay?.received && cashPay.received > 0 ? `<div class="row row-muted"><span>Recibido</span><span>${formatCurrency(cashPay.received)}</span></div>` : ''}
+      ${changeAmt > 0 ? `<div class="cambio-row"><span>&#10003; CAMBIO</span><span>${formatCurrency(changeAmt)}</span></div>` : ''}
+      <hr class="sep">
+      ${receipt.notes ? `<div class="center meta">${receipt.notes}</div><hr class="sep">` : ''}
+      <div class="center">
+        <div style="font-size:13px">&#9733; &#161;Gracias por su compra! &#9733;</div>
+        <div class="footer">Vuelva pronto &mdash; Alcarav&aacute;n</div>
+      </div>
     </body></html>`)
     w.document.close()
     w.focus()
-    setTimeout(() => { w.print(); w.close() }, 350)
+    setTimeout(() => { w.print(); w.close() }, 400)
   }
 
   return (
@@ -147,103 +190,110 @@ function ReceiptModal({ receipt, onClose }: { receipt: ReceiptData; onClose: () 
             </button>
           </div>
 
-          {/* Ticket imprimible */}
-          <div className="print-receipt flex-1 overflow-y-auto p-4">
-            {/* Cabecera tienda */}
-            <div className="text-center border-b border-dashed border-stone-300 pb-3 mb-3">
-              <p className="font-bold text-lg tracking-wide">Alcaraván</p>
-              <p className="text-xs text-stone-500">Minimarket - Café</p>
-              <p className="text-xs text-stone-500">Minimarket - Café</p>
-              <p className="text-xs text-stone-400 mt-1">
-                {receipt.date.toLocaleDateString('es-CO', {
-                  day: '2-digit', month: 'long', year: 'numeric'
-                })}{' '}
-                {receipt.date.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}
-              </p>
-              <p className="text-xs font-mono font-bold mt-1">{receipt.saleNumber}</p>
-              {receipt.customerName && (
-                <p className="text-xs text-stone-500 mt-0.5">Cliente: {receipt.customerName}</p>
-              )}
-            </div>
+          {/* Ticket imprimible — preview */}
+          <div className="print-receipt flex-1 overflow-y-auto bg-stone-50">
+            {/* Papel del ticket */}
+            <div className="mx-auto max-w-[280px] bg-white shadow-sm font-mono text-[11px] leading-relaxed py-4 px-3">
 
-            {/* Ítems */}
-            <table className="w-full text-xs mb-3">
-              <thead>
-                <tr className="border-b border-stone-200">
-                  <th className="text-left py-1 font-semibold text-stone-600">Producto</th>
-                  <th className="text-center py-1 font-semibold text-stone-600 w-8">Cant</th>
-                  <th className="text-right py-1 font-semibold text-stone-600 w-20">Total</th>
-                </tr>
-              </thead>
-              <tbody>
+              {/* Cabecera */}
+              <div className="text-center pb-3 border-b border-dashed border-stone-300">
+                <p className="font-black text-xl tracking-[4px] text-stone-900">ALCARAVÁN</p>
+                <p className="text-[10px] text-stone-500 tracking-widest mt-0.5">♦ MINIMARKET &amp; CAFÉ ♦</p>
+                <div className="mt-2 text-[10px] text-stone-500 space-y-0.5">
+                  <p>
+                    {receipt.date.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    {' · '}
+                    {receipt.date.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                  <p className="font-bold text-stone-700">{receipt.saleNumber}</p>
+                  {receipt.customerName && (
+                    <p>Cliente: <span className="font-semibold text-stone-700">{receipt.customerName}</span></p>
+                  )}
+                </div>
+              </div>
+
+              {/* Ítems */}
+              <div className="py-2.5 space-y-2 border-b border-dashed border-stone-300">
                 {receipt.items.map((item, i) => (
-                  <tr key={i} className="border-b border-stone-50">
-                    <td className="py-1.5 text-stone-800 leading-tight">{item.product_name}</td>
-                    <td className="py-1.5 text-center text-stone-600">{item.quantity}</td>
-                    <td className="py-1.5 text-right font-medium text-stone-800">
-                      {formatCurrency(item.total)}
-                    </td>
-                  </tr>
+                  <div key={i}>
+                    <p className="font-bold text-stone-800 leading-tight">{item.product_name}</p>
+                    <div className="flex justify-between text-stone-500 pl-2 text-[10px]">
+                      {item.quantity > 1
+                        ? <span>{item.quantity} × {formatCurrency(item.unit_price)}</span>
+                        : <span />
+                      }
+                      <span className="font-semibold text-stone-700">{formatCurrency(item.total)}</span>
+                    </div>
+                  </div>
                 ))}
-              </tbody>
-            </table>
-
-            {/* Totales */}
-            <div className="border-t border-dashed border-stone-300 pt-2 space-y-1 text-xs">
-              <div className="flex justify-between text-stone-600">
-                <span>Subtotal</span>
-                <span>{formatCurrency(receipt.subtotal)}</span>
               </div>
-              {receipt.discount > 0 && (
-                <div className="flex justify-between text-emerald-600">
-                  <span>Descuento</span>
-                  <span>- {formatCurrency(receipt.discount)}</span>
-                </div>
-              )}
-              {receipt.tax > 0 && (
-                <div className="flex justify-between text-stone-500">
-                  <span>IVA</span>
-                  <span>{formatCurrency(receipt.tax)}</span>
-                </div>
-              )}
-              <div className="flex justify-between font-bold text-sm text-stone-800 border-t border-stone-300 pt-1 mt-1">
-                <span>TOTAL</span>
-                <span>{formatCurrency(receipt.total)}</span>
+
+              {/* Totales */}
+              <div className="py-2 space-y-1">
+                {(receipt.subtotal !== receipt.total || receipt.discount > 0 || receipt.tax > 0) && (
+                  <div className="flex justify-between text-stone-500">
+                    <span>Subtotal</span><span>{formatCurrency(receipt.subtotal)}</span>
+                  </div>
+                )}
+                {receipt.discount > 0 && (
+                  <div className="flex justify-between text-emerald-600">
+                    <span>Descuento</span><span>− {formatCurrency(receipt.discount)}</span>
+                  </div>
+                )}
+                {receipt.tax > 0 && (
+                  <div className="flex justify-between text-stone-500">
+                    <span>IVA</span><span>{formatCurrency(receipt.tax)}</span>
+                  </div>
+                )}
+                {!!receipt.cardCommission && receipt.cardCommission > 0 && (
+                  <div className="flex justify-between text-orange-600">
+                    <span>Comisión tarjeta (2.5%)</span>
+                    <span>+ {formatCurrency(receipt.cardCommission)}</span>
+                  </div>
+                )}
               </div>
-            </div>
 
-            {/* Pagos */}
-            <div className="border-t border-dashed border-stone-300 pt-2 mt-2 space-y-1 text-xs">
-              {receipt.payments.map((p, i) => (
-                <div key={i} className="flex justify-between text-stone-600">
-                  <span>{PAYMENT_LABELS[p.method] ?? p.method}</span>
-                  <span>{formatCurrency(p.amount)}</span>
+              {/* TOTAL */}
+              <div className="border-t-2 border-stone-800 pt-1.5 pb-2">
+                <div className="flex justify-between font-black text-base text-stone-900">
+                  <span>TOTAL</span>
+                  <span>{formatCurrency(receipt.total + (receipt.cardCommission ?? 0))}</span>
                 </div>
-              ))}
-              {cashPayment?.received && cashPayment.received > 0 && (
-                <div className="flex justify-between text-stone-500">
-                  <span>Recibido</span>
-                  <span>{formatCurrency(cashPayment.received)}</span>
+              </div>
+
+              {/* Pagos */}
+              <div className="border-t border-dashed border-stone-300 pt-2 pb-1 space-y-1">
+                {receipt.payments.map((p, i) => (
+                  <div key={i} className="flex justify-between text-stone-600">
+                    <span>{PAYMENT_LABELS[p.method] ?? p.method}</span>
+                    <span>{formatCurrency(p.amount)}</span>
+                  </div>
+                ))}
+                {cashPayment?.received && cashPayment.received > 0 && (
+                  <div className="flex justify-between text-stone-500">
+                    <span>Recibido</span><span>{formatCurrency(cashPayment.received)}</span>
+                  </div>
+                )}
+                {change > 0 && (
+                  <div className="flex justify-between font-bold text-white bg-stone-800 px-2 py-1 mt-1 rounded">
+                    <span>✓ CAMBIO</span><span>{formatCurrency(change)}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Notas */}
+              {receipt.notes && (
+                <div className="border-t border-dashed border-stone-300 pt-2 mt-1">
+                  <p className="text-[10px] text-stone-400 text-center">{receipt.notes}</p>
                 </div>
               )}
-              {change > 0 && (
-                <div className="flex justify-between font-bold text-emerald-700">
-                  <span>Cambio</span>
-                  <span>{formatCurrency(change)}</span>
-                </div>
-              )}
-            </div>
 
-            {/* Notas */}
-            {receipt.notes && (
-              <p className="text-xs text-stone-400 mt-2 text-center border-t border-dashed border-stone-200 pt-2">
-                {receipt.notes}
-              </p>
-            )}
+              {/* Pie */}
+              <div className="border-t border-dashed border-stone-300 mt-2 pt-2 text-center space-y-0.5">
+                <p className="text-xs font-semibold text-stone-700">★ ¡Gracias por su compra! ★</p>
+                <p className="text-[10px] text-stone-400">Vuelva pronto — Alcaraván</p>
+              </div>
 
-            {/* Pie */}
-            <div className="text-center mt-3 pt-2 border-t border-dashed border-stone-300">
-              <p className="text-xs text-stone-400">¡Gracias por su compra!</p>
             </div>
           </div>
 
@@ -506,123 +556,199 @@ function PaymentModal({
   total: number
   hasCustomer: boolean
   onClose: () => void
-  onConfirm: (payments: CartPayment[]) => void
+  onConfirm: (payments: CartPayment[], cardCommission: number) => void
   onConfirmFiado: () => void
 }) {
   const [payments, setPayments] = useState<CartPayment[]>([{ method: 'cash', amount: total }])
   const [processing, setProcessing] = useState(false)
 
+  const CARD_METHODS: PaymentMethod[] = ['card_debit', 'card_credit']
+  const CARD_COMMISSION_RATE = 0.025
+
   const METHODS: { key: PaymentMethod; label: string; icon: string }[] = [
-    { key: 'cash', label: 'Efectivo', icon: '💵' },
-    { key: 'card_debit', label: 'Débito', icon: '💳' },
-    { key: 'card_credit', label: 'Crédito', icon: '💳' },
-    { key: 'transfer', label: 'Transferencia', icon: '🏦' },
-    { key: 'nequi', label: 'Nequi', icon: '📱' },
-    { key: 'daviplata', label: 'Daviplata', icon: '📱' },
-    { key: 'bancolombia', label: 'Bancolombia', icon: '🏦' },
-    { key: 'other', label: 'Otro', icon: '💰' },
+    { key: 'cash',        label: 'Efectivo',       icon: '💵' },
+    { key: 'card_debit',  label: 'Débito',          icon: '💳' },
+    { key: 'card_credit', label: 'Crédito',         icon: '💳' },
+    { key: 'transfer',    label: 'Transferencia',   icon: '🏦' },
+    { key: 'nequi',       label: 'Nequi',           icon: '📱' },
+    { key: 'daviplata',   label: 'Daviplata',       icon: '📱' },
+    { key: 'bancolombia', label: 'Bancolombia',     icon: '🏦' },
+    { key: 'other',       label: 'Otro',            icon: '💰' },
   ]
 
-  const paidTotal = payments.reduce((s, p) => s + (p.amount || 0), 0)
-  const remaining = total - paidTotal
-  const change = payments.find((p) => p.method === 'cash')?.received
-    ? (payments.find((p) => p.method === 'cash')!.received! - payments.find((p) => p.method === 'cash')!.amount)
+  // ─── Cálculos ───────────────────────────────────────────────────────
+  // Los inputs representan la PORCIÓN DEL PRODUCTO (sin comisión).
+  // La comisión se calcula sobre esa porción y se cobra APARTE al cliente.
+  const paidTotal   = payments.reduce((s, p) => s + (p.amount || 0), 0)
+  const remaining   = total - paidTotal                           // faltante en valor producto
+  const cardProductTotal = payments
+    .filter(p => CARD_METHODS.includes(p.method))
+    .reduce((s, p) => s + (p.amount || 0), 0)
+  const cardCommission   = Math.round(cardProductTotal * CARD_COMMISSION_RATE)
+  const effectiveTotal   = total + cardCommission                 // lo que el cliente paga en total
+  const cashPay = payments.find(p => p.method === 'cash')
+  const change  = cashPay?.received && cashPay.received > cashPay.amount
+    ? cashPay.received - cashPay.amount
     : 0
+
+  // ─── Acciones ───────────────────────────────────────────────────────
+  function toggleMethod(key: PaymentMethod) {
+    const idx = payments.findIndex(p => p.method === key)
+    if (idx >= 0) {
+      // Quitar: solo si hay más de uno
+      if (payments.length === 1) return
+      setPayments(payments.filter((_, i) => i !== idx))
+    } else {
+      // Agregar: auto-rellena con lo que falta
+      const fill = Math.max(0, remaining)
+      setPayments([...payments, { method: key, amount: fill }])
+    }
+  }
+
+  function updateAmount(idx: number, value: number) {
+    setPayments(payments.map((p, i) => i === idx ? { ...p, amount: value } : p))
+  }
+
+  function updateReceived(idx: number, value: number) {
+    setPayments(payments.map((p, i) => i === idx ? { ...p, received: value } : p))
+  }
+
+  const isActive = (key: PaymentMethod) => payments.some(p => p.method === key)
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+
+        {/* Encabezado */}
         <div className="px-6 py-5 border-b border-stone-100">
-          <h3 className="text-xl font-bold text-stone-800">Registrar Pago</h3>
-          <p className="text-3xl font-bold text-amber-700 mt-1">{formatCurrency(total)}</p>
-        </div>
-
-        <div className="p-6 space-y-4">
-          {/* Método de pago rápido */}
-          <div>
-            <p className="text-sm font-medium text-stone-600 mb-2">Método de pago</p>
-            <div className="grid grid-cols-4 gap-2">
-              {METHODS.map((m) => (
-                <button
-                  key={m.key}
-                  onClick={() => setPayments([{ method: m.key, amount: total }])}
-                  className={`flex flex-col items-center gap-1 p-2 rounded-xl border-2 transition-all text-center ${
-                    payments[0]?.method === m.key && payments.length === 1
-                      ? 'border-amber-700 bg-amber-50'
-                      : 'border-stone-200 hover:border-stone-300'
-                  }`}
-                >
-                  <span className="text-lg">{m.icon}</span>
-                  <span className="text-[10px] font-medium text-stone-600 leading-tight">{m.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Monto por método */}
-          {payments.map((p, i) => (
-            <div key={i} className="space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-stone-600 w-24">
-                  {METHODS.find((m) => m.key === p.method)?.label}
-                </span>
-                <input
-                  type="number"
-                  value={p.amount || ''}
-                  onChange={(e) => {
-                    const newP = [...payments]
-                    newP[i].amount = parseFloat(e.target.value) || 0
-                    setPayments(newP)
-                  }}
-                  className="flex-1 px-3 py-2 rounded-xl border border-stone-200 text-right font-bold text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-700"
-                  placeholder="0"
-                />
-              </div>
-              {p.method === 'cash' && (
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-stone-500 w-24">Recibido</span>
-                  <input
-                    type="number"
-                    value={p.received || ''}
-                    onChange={(e) => {
-                      const newP = [...payments]
-                      newP[i].received = parseFloat(e.target.value) || 0
-                      setPayments(newP)
-                    }}
-                    className="flex-1 px-3 py-2 rounded-xl border border-stone-200 text-right text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-700"
-                    placeholder={formatCurrency(total)}
-                  />
-                </div>
+          <div className="flex items-start justify-between">
+            <div>
+              <h3 className="text-xl font-bold text-stone-800">Registrar Pago</h3>
+              <p className="text-3xl font-bold text-amber-700 mt-0.5">{formatCurrency(effectiveTotal)}</p>
+              {cardCommission > 0 && (
+                <p className="text-xs text-orange-500 mt-0.5">
+                  Productos {formatCurrency(total)} + comisión tarjeta {formatCurrency(cardCommission)}
+                </p>
               )}
             </div>
-          ))}
+            <button onClick={onClose} className="w-8 h-8 rounded-xl bg-stone-100 hover:bg-stone-200 flex items-center justify-center text-stone-500 mt-1">✕</button>
+          </div>
+        </div>
 
-          {/* Pago mixto */}
-          <button
-            onClick={() => setPayments([...payments, { method: 'transfer', amount: remaining > 0 ? remaining : 0 }])}
-            className="text-sm text-amber-700 hover:underline font-medium"
-          >
-            + Agregar otro método de pago
-          </button>
+        <div className="p-5 space-y-5">
 
-          {/* Resumen */}
-          <div className="bg-stone-50 rounded-xl p-4 space-y-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-stone-600">Total a cobrar</span>
+          {/* ── Métodos activos con sus montos ── */}
+          <div className="space-y-3">
+            {payments.map((p, i) => {
+              const meta = METHODS.find(m => m.key === p.method)!
+              const isCard = CARD_METHODS.includes(p.method)
+              const terminalAmount = isCard ? Math.round(p.amount * (1 + CARD_COMMISSION_RATE)) : 0
+              return (
+                <div key={p.method} className="rounded-xl border border-stone-200 p-3 space-y-2 bg-stone-50">
+                  {/* Fila título + quitar */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold text-stone-700 flex items-center gap-1.5">
+                      <span>{meta.icon}</span> {meta.label}
+                      {isCard && <span className="text-[10px] text-orange-500 font-medium bg-orange-50 px-1.5 py-0.5 rounded-full">+2.5%</span>}
+                    </span>
+                    {payments.length > 1 && (
+                      <button
+                        onClick={() => toggleMethod(p.method)}
+                        className="text-xs text-stone-400 hover:text-red-500 transition-colors px-1"
+                      >✕ quitar</button>
+                    )}
+                  </div>
+
+                  {/* Monto */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-stone-500 w-20">{isCard ? 'Porción producto' : 'Monto'}</span>
+                    <input
+                      type="number"
+                      value={p.amount || ''}
+                      onChange={(e) => updateAmount(i, parseFloat(e.target.value) || 0)}
+                      className="flex-1 px-3 py-2 rounded-lg border border-stone-200 text-right font-bold text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
+                      placeholder="0"
+                    />
+                  </div>
+
+                  {/* Info terminal para tarjeta */}
+                  {isCard && p.amount > 0 && (
+                    <p className="text-xs text-orange-600 text-right">
+                      💳 Cobrar en datáfono: <strong>{formatCurrency(terminalAmount)}</strong>
+                      <span className="text-stone-400"> (incluye comisión {formatCurrency(terminalAmount - p.amount)})</span>
+                    </p>
+                  )}
+
+                  {/* Recibido + cambio para efectivo */}
+                  {p.method === 'cash' && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-stone-500 w-20">Recibido</span>
+                      <input
+                        type="number"
+                        value={p.received || ''}
+                        onChange={(e) => updateReceived(i, parseFloat(e.target.value) || 0)}
+                        className="flex-1 px-3 py-2 rounded-lg border border-stone-200 text-right text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
+                        placeholder={formatCurrency(p.amount || total)}
+                      />
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          {/* ── Agregar método ── */}
+          {payments.length < METHODS.length && (
+            <div>
+              <p className="text-xs font-medium text-stone-500 mb-2">+ Agregar otro método de pago</p>
+              <div className="grid grid-cols-4 gap-2">
+                {METHODS.filter(m => !isActive(m.key)).map(m => (
+                  <button
+                    key={m.key}
+                    onClick={() => toggleMethod(m.key)}
+                    className="flex flex-col items-center gap-0.5 py-2 px-1 rounded-xl border-2 border-dashed border-stone-200 hover:border-amber-500 hover:bg-amber-50 transition-all text-center"
+                  >
+                    <span className="text-base">{m.icon}</span>
+                    <span className="text-[10px] font-medium text-stone-500 leading-tight">{m.label}</span>
+                    {CARD_METHODS.includes(m.key) && (
+                      <span className="text-[9px] text-orange-400 leading-tight">+2.5%</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Resumen ── */}
+          <div className="bg-stone-50 rounded-xl p-4 space-y-1.5 text-sm border border-stone-100">
+            <div className="flex justify-between text-stone-600">
+              <span>Valor productos</span>
               <span className="font-bold text-stone-800">{formatCurrency(total)}</span>
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-stone-600">Total pagado</span>
+            {cardCommission > 0 && (
+              <div className="flex justify-between text-orange-600">
+                <span>Comisión tarjeta (2.5%)</span>
+                <span>+ {formatCurrency(cardCommission)}</span>
+              </div>
+            )}
+            {cardCommission > 0 && (
+              <div className="flex justify-between font-bold text-stone-800 border-t border-stone-200 pt-1.5">
+                <span>Total a cobrar</span>
+                <span>{formatCurrency(effectiveTotal)}</span>
+              </div>
+            )}
+            <div className="flex justify-between text-stone-600 border-t border-stone-100 pt-1.5">
+              <span>Total ingresado</span>
               <span className="font-bold text-stone-800">{formatCurrency(paidTotal)}</span>
             </div>
-            {remaining > 0 && (
-              <div className="flex justify-between text-sm text-red-600 font-medium">
+            {remaining > 0.5 && (
+              <div className="flex justify-between text-red-600 font-semibold">
                 <span>Faltante</span>
                 <span>{formatCurrency(remaining)}</span>
               </div>
             )}
             {change > 0 && (
-              <div className="flex justify-between text-sm text-emerald-600 font-bold border-t border-stone-200 pt-2">
+              <div className="flex justify-between text-emerald-600 font-bold border-t border-stone-200 pt-1.5">
                 <span>Cambio a devolver</span>
                 <span>{formatCurrency(change)}</span>
               </div>
@@ -630,7 +756,7 @@ function PaymentModal({
           </div>
         </div>
 
-        <div className="px-6 pb-6 space-y-2">
+        <div className="px-5 pb-5 space-y-2">
           {/* Botón Fiado */}
           {hasCustomer && (
             <button
@@ -651,10 +777,10 @@ function PaymentModal({
             <button
               onClick={async () => {
                 setProcessing(true)
-                await onConfirm(payments)
+                await onConfirm(payments, cardCommission)
                 setProcessing(false)
               }}
-              disabled={remaining > 0 || processing}
+              disabled={remaining > 0.5 || processing}
               className="flex-1 py-3 rounded-xl bg-amber-700 text-white font-bold hover:bg-amber-800 disabled:bg-stone-300 disabled:cursor-not-allowed transition-colors shadow-lg shadow-amber-700/30"
             >
               {processing ? (
@@ -722,10 +848,10 @@ export default function POSPage() {
 
   async function handleConfirmFiado() {
     if (!customer) return
-    await handleConfirmSale([], true)
+    await handleConfirmSale([], 0, true)
   }
 
-  async function handleConfirmSale(payments: CartPayment[], isFiado = false) {
+  async function handleConfirmSale(payments: CartPayment[], cardCommission = 0, isFiado = false) {
     try {
       setSaleError('')
 
@@ -808,6 +934,7 @@ export default function POSPage() {
         discount: cartDiscount,
         tax: cartTax,
         total: cartTotal,
+        cardCommission: cardCommission > 0 ? cardCommission : undefined,
         payments,
         customerName: cartCustomer
           ? (cartCustomer.full_name || [cartCustomer.first_name, cartCustomer.last_name].filter(Boolean).join(' '))
@@ -1000,7 +1127,7 @@ export default function POSPage() {
           total={total}
           hasCustomer={!!customer}
           onClose={() => setShowPayment(false)}
-          onConfirm={handleConfirmSale}
+          onConfirm={(payments, commission) => handleConfirmSale(payments, commission)}
           onConfirmFiado={handleConfirmFiado}
         />
       )}
