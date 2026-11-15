@@ -45,7 +45,7 @@ function ReceiptModal({ receipt, onClose }: { receipt: ReceiptData; onClose: () 
   }
 
   function handlePrint() {
-    const w = window.open('', '_blank', 'width=320,height=600')
+    const w = window.open('', '_blank', 'width=320')
     if (!w) { window.print(); return }
     const cashPay = receipt.payments.find((p) => p.method === 'cash')
     const changeAmt = cashPay?.received ? cashPay.received - cashPay.amount : 0
@@ -66,87 +66,61 @@ function ReceiptModal({ receipt, onClose }: { receipt: ReceiptData; onClose: () 
     w.document.write(`<!DOCTYPE html><html><head>
       <meta charset="UTF-8">
       <style>
-        @page { margin: 4mm 2mm; size: 80mm auto; }
-        * { box-sizing: border-box; }
+        @page { size: 80mm auto; margin: 0; }
+        html { height: auto; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
           font-family: 'Courier New', Courier, monospace;
-          font-size: 12px;
+          font-size: 11px;
           width: 76mm;
           margin: 0 auto;
-          padding: 2px;
+          padding: 2mm;
           color: #000;
-          line-height: 1.45;
+          line-height: 1.25;
+          height: auto;
+          overflow: hidden;
         }
-        .center { text-align: center; }
-        .store { font-size: 22px; font-weight: 900; letter-spacing: 3px; margin: 6px 0 2px; }
-        .store-sub { font-size: 10px; letter-spacing: 1px; color: #444; }
-        .sep { border: none; border-top: 1px dashed #333; margin: 7px 0; }
-        .sep-solid { border: none; border-top: 2px solid #000; margin: 7px 0; }
-        .meta { font-size: 10px; color: #555; margin: 2px 0; }
-        .sale-num { font-size: 11px; font-weight: bold; margin: 3px 0; }
-        .item { margin: 5px 0; }
-        .item-name { font-size: 11px; font-weight: bold; word-break: break-word; }
-        .item-detail {
-          display: flex;
-          justify-content: space-between;
-          font-size: 10px;
-          color: #444;
-          padding-left: 6px;
-        }
-        .row {
-          display: flex;
-          justify-content: space-between;
-          font-size: 11px;
-          margin: 3px 0;
-        }
-        .row-muted { color: #555; }
-        .total-row {
-          display: flex;
-          justify-content: space-between;
-          font-size: 15px;
-          font-weight: 900;
-          margin: 4px 0 2px;
-        }
-        .cambio-row {
-          display: flex;
-          justify-content: space-between;
-          font-size: 13px;
-          font-weight: bold;
-          background: #000;
-          color: #fff;
-          padding: 3px 4px;
-          margin-top: 4px;
-        }
-        .footer { font-size: 10px; color: #666; margin: 4px 0 2px; }
+        .c { text-align: center; }
+        .store { font-size: 17px; font-weight: 900; letter-spacing: 2px; padding: 3px 0 1px; }
+        .store-sub { font-size: 9px; letter-spacing: 1px; color: #444; }
+        .sep { border: none; border-top: 1px dashed #555; margin: 3px 0; }
+        .sep2 { border: none; border-top: 2px solid #000; margin: 3px 0; }
+        .meta { font-size: 9px; color: #555; }
+        .num { font-size: 10px; font-weight: bold; padding: 1px 0; }
+        .item { padding: 2px 0; }
+        .iname { font-size: 10px; font-weight: bold; word-break: break-word; }
+        .idet { display:flex; justify-content:space-between; font-size:9px; color:#444; padding-left:4px; }
+        .row { display:flex; justify-content:space-between; font-size:10px; padding: 1px 0; }
+        .muted { color:#666; }
+        .big { display:flex; justify-content:space-between; font-size:14px; font-weight:900; padding:2px 0; }
+        .cambio { display:flex; justify-content:space-between; font-size:12px; font-weight:bold; background:#000; color:#fff; padding:2px 4px; margin:2px 0; }
+        .foot { font-size:9px; color:#666; padding:2px 0; }
       </style>
     </head><body>
-      <div class="center">
+      <div class="c">
         <div class="store">ALCARAV&Aacute;N</div>
-        <div class="store-sub">&#9830; MINIMARKET &amp; CAF&Eacute; &#9830;</div>
+        <div class="store-sub">MINIMARKET &amp; CAF&Eacute;</div>
         <hr class="sep">
-        <div class="meta">${dateStr} &nbsp; ${timeStr}</div>
-        <div class="sale-num">${receipt.saleNumber}</div>
+        <div class="meta">${dateStr} ${timeStr} &nbsp; <b>${receipt.saleNumber}</b></div>
         ${receipt.customerName ? `<div class="meta">Cliente: <b>${receipt.customerName}</b></div>` : ''}
       </div>
       <hr class="sep">
       ${itemsHtml}
       <hr class="sep">
-      ${receipt.subtotal !== receipt.total || receipt.discount > 0 || receipt.tax > 0 ? `<div class="row row-muted"><span>Subtotal</span><span>${formatCurrency(receipt.subtotal)}</span></div>` : ''}
-      ${receipt.discount > 0 ? `<div class="row row-muted"><span>Descuento</span><span>&minus; ${formatCurrency(receipt.discount)}</span></div>` : ''}
-      ${receipt.tax > 0 ? `<div class="row row-muted"><span>IVA</span><span>${formatCurrency(receipt.tax)}</span></div>` : ''}
-      ${receipt.cardCommission && receipt.cardCommission > 0 ? `<div class="row row-muted"><span>Comisi&oacute;n tarjeta (2.5%)</span><span>+ ${formatCurrency(receipt.cardCommission)}</span></div>` : ''}
-      <hr class="sep-solid">
-      <div class="total-row"><span>TOTAL</span><span>${formatCurrency(receipt.total + (receipt.cardCommission ?? 0))}</span></div>
+      ${receipt.subtotal !== receipt.total || receipt.discount > 0 || receipt.tax > 0 ? `<div class="row muted"><span>Subtotal</span><span>${formatCurrency(receipt.subtotal)}</span></div>` : ''}
+      ${receipt.discount > 0 ? `<div class="row muted"><span>Descuento</span><span>&minus;${formatCurrency(receipt.discount)}</span></div>` : ''}
+      ${receipt.tax > 0 ? `<div class="row muted"><span>IVA</span><span>${formatCurrency(receipt.tax)}</span></div>` : ''}
+      ${receipt.cardCommission && receipt.cardCommission > 0 ? `<div class="row muted"><span>Comisi&oacute;n tarjeta 2.5%</span><span>+${formatCurrency(receipt.cardCommission)}</span></div>` : ''}
+      <hr class="sep2">
+      <div class="big"><span>TOTAL</span><span>${formatCurrency(receipt.total + (receipt.cardCommission ?? 0))}</span></div>
       <hr class="sep">
       ${paymentsHtml}
-      ${cashPay?.received && cashPay.received > 0 ? `<div class="row row-muted"><span>Recibido</span><span>${formatCurrency(cashPay.received)}</span></div>` : ''}
-      ${changeAmt > 0 ? `<div class="cambio-row"><span>&#10003; CAMBIO</span><span>${formatCurrency(changeAmt)}</span></div>` : ''}
+      ${cashPay?.received && cashPay.received > 0 ? `<div class="row muted"><span>Recibido</span><span>${formatCurrency(cashPay.received)}</span></div>` : ''}
+      ${changeAmt > 0 ? `<div class="cambio"><span>CAMBIO</span><span>${formatCurrency(changeAmt)}</span></div>` : ''}
+      ${receipt.notes ? `<hr class="sep"><div class="c meta">${receipt.notes}</div>` : ''}
       <hr class="sep">
-      ${receipt.notes ? `<div class="center meta">${receipt.notes}</div><hr class="sep">` : ''}
-      <div class="center">
-        <div style="font-size:13px">&#9733; &#161;Gracias por su compra! &#9733;</div>
-        <div class="footer">Vuelva pronto &mdash; Alcarav&aacute;n</div>
-      </div>
+      <div class="c foot">&#161;Gracias por su compra! &mdash; Alcarav&aacute;n</div>
+      <div style="height:8mm"></div>
     </body></html>`)
     w.document.close()
     w.focus()
