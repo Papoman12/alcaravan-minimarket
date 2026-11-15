@@ -113,6 +113,7 @@ ${changeAmt > 0 ? `<div class="cam"><span>CAMBIO</span><span>${formatCurrency(ch
 ${receipt.notes ? `<hr class="sep"><div class="c meta">${receipt.notes}</div>` : ''}
 <hr class="sep">
 <div class="c foot">¡Gracias por su compra! — Alcaraván</div>
+<div style="height:15mm"></div>
 </body></html>`
 
     // Crear iframe EN el viewport pero invisible (off-screen impide el layout en algunos navegadores)
