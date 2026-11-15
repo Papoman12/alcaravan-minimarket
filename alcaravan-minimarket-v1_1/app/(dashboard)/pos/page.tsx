@@ -542,7 +542,7 @@ function PaymentModal({
   onConfirm: (payments: CartPayment[], cardCommission: number) => void
   onConfirmFiado: () => void
 }) {
-  const [payments, setPayments] = useState<CartPayment[]>([{ method: 'cash', amount: total }])
+  const [payments, setPayments] = useState<CartPayment[]>([])
   const [processing, setProcessing] = useState(false)
 
   const CARD_METHODS: PaymentMethod[] = ['card_debit', 'card_credit']
@@ -582,8 +582,8 @@ function PaymentModal({
       if (payments.length === 1) return
       setPayments(payments.filter((_, i) => i !== idx))
     } else {
-      // Agregar: auto-rellena con lo que falta
-      const fill = Math.max(0, remaining)
+      // Agregar: si es el primero llena con el total, si no con lo que falta
+      const fill = payments.length === 0 ? total : Math.max(0, remaining)
       setPayments([...payments, { method: key, amount: fill }])
     }
   }
@@ -619,6 +619,11 @@ function PaymentModal({
         </div>
 
         <div className="p-5 space-y-5">
+
+          {/* ── Sin método seleccionado: aviso ── */}
+          {payments.length === 0 && (
+            <p className="text-center text-sm text-stone-400 py-1">Selecciona un método de pago</p>
+          )}
 
           {/* ── Métodos activos con sus montos ── */}
           <div className="space-y-3">
@@ -680,19 +685,25 @@ function PaymentModal({
             })}
           </div>
 
-          {/* ── Agregar método ── */}
+          {/* ── Selección de método ── */}
           {payments.length < METHODS.length && (
             <div>
-              <p className="text-xs font-medium text-stone-500 mb-2">+ Agregar otro método de pago</p>
+              <p className="text-xs font-medium text-stone-500 mb-2">
+                {payments.length === 0 ? 'Método de pago' : '+ Agregar otro método'}
+              </p>
               <div className="grid grid-cols-4 gap-2">
                 {METHODS.filter(m => !isActive(m.key)).map(m => (
                   <button
                     key={m.key}
                     onClick={() => toggleMethod(m.key)}
-                    className="flex flex-col items-center gap-0.5 py-2 px-1 rounded-xl border-2 border-dashed border-stone-200 hover:border-amber-500 hover:bg-amber-50 transition-all text-center"
+                    className={`flex flex-col items-center gap-0.5 py-2 px-1 rounded-xl border-2 transition-all text-center ${
+                      payments.length === 0
+                        ? 'border-stone-300 hover:border-amber-600 hover:bg-amber-50 bg-white shadow-sm'
+                        : 'border-dashed border-stone-200 hover:border-amber-500 hover:bg-amber-50'
+                    }`}
                   >
                     <span className="text-base">{m.icon}</span>
-                    <span className="text-[10px] font-medium text-stone-500 leading-tight">{m.label}</span>
+                    <span className="text-[10px] font-medium text-stone-600 leading-tight">{m.label}</span>
                     {CARD_METHODS.includes(m.key) && (
                       <span className="text-[9px] text-orange-400 leading-tight">+2.5%</span>
                     )}
@@ -763,7 +774,7 @@ function PaymentModal({
                 await onConfirm(payments, cardCommission)
                 setProcessing(false)
               }}
-              disabled={remaining > 0.5 || processing}
+              disabled={payments.length === 0 || remaining > 0.5 || processing}
               className="flex-1 py-3 rounded-xl bg-amber-700 text-white font-bold hover:bg-amber-800 disabled:bg-stone-300 disabled:cursor-not-allowed transition-colors shadow-lg shadow-amber-700/30"
             >
               {processing ? (
