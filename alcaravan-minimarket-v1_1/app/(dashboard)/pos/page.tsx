@@ -115,10 +115,11 @@ ${receipt.notes ? `<hr class="sep"><div class="c meta">${receipt.notes}</div>` :
 <div class="c foot">¡Gracias por su compra! — Alcaraván</div>
 </body></html>`
 
-    // Crear iframe oculto fuera de la vista
+    // Crear iframe EN el viewport pero invisible (off-screen impide el layout en algunos navegadores)
     const iframe = document.createElement('iframe')
     iframe.setAttribute('id', '__thermal_iframe__')
-    iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:302px;height:600px;border:none;opacity:0;pointer-events:none;'
+    // opacity:0 lo hace invisible; z-index:-1 lo manda al fondo; sigue en el viewport → el browser sí lo renderiza
+    iframe.style.cssText = 'position:fixed;top:0;left:0;width:302px;height:800px;border:none;opacity:0;pointer-events:none;z-index:-1;'
     document.body.appendChild(iframe)
 
     const iframeDoc = iframe.contentDocument!
@@ -126,33 +127,35 @@ ${receipt.notes ? `<hr class="sep"><div class="c meta">${receipt.notes}</div>` :
     iframeDoc.write(rcptHtml)
     iframeDoc.close()
 
-    // Esperar a que el iframe termine de renderizar
+    // 800ms: tiempo suficiente para que Courier New cargue y el layout se calcule
     setTimeout(() => {
-      // Medir la altura real del contenido (renderizado a 80mm de ancho)
-      const bodyEl    = iframeDoc.body
-      const heightPx  = bodyEl.scrollHeight
-      // 1 px CSS = 25.4/96 mm ≈ 0.2646 mm   (96 dpi estándar de CSS)
-      const heightMm  = Math.ceil(heightPx * 0.2646) + 8   // +8mm buffer de corte
+      const bodyEl = iframeDoc.body
+      // Usar el mayor de scrollHeight / offsetHeight para no quedar cortos
+      const heightPx = Math.max(
+        bodyEl.scrollHeight,
+        bodyEl.offsetHeight,
+        iframeDoc.documentElement.scrollHeight
+      )
+      // 1 CSS px = 25.4/96 mm ≈ 0.2646 mm
+      // +25mm de buffer para compensar diferencias entre renderizado de pantalla y de impresora
+      const heightMm = Math.ceil(heightPx * 0.2646) + 25
 
-      // Inyectar @page con la altura exacta medida
       const pgStyle = iframeDoc.createElement('style')
       pgStyle.textContent = `@page { size: 80mm ${heightMm}mm; margin: 0; }`
       iframeDoc.head.appendChild(pgStyle)
 
-      // Imprimir desde el contexto del iframe
       const iframeWin = iframe.contentWindow!
       iframeWin.focus()
       iframeWin.print()
 
-      // Limpiar iframe después de imprimir
       const removeIframe = () => {
         const el = document.getElementById('__thermal_iframe__')
         if (el) document.body.removeChild(el)
-        iframeWin.onafterprint = null
+        try { iframeWin.onafterprint = null } catch(_) {}
       }
       iframeWin.onafterprint = removeIframe
-      setTimeout(removeIframe, 4000)   // fallback
-    }, 600)
+      setTimeout(removeIframe, 5000)
+    }, 800)
   }
 
   return (
