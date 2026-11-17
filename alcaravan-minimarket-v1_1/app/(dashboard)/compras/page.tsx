@@ -531,7 +531,6 @@ interface PurchaseItemDetail {
   product_name: string
   quantity: number
   unit_cost: number
-  total_cost: number
 }
 
 function DetalleCompraModal({
@@ -551,7 +550,7 @@ function DetalleCompraModal({
     async function loadItems() {
       const { data, error } = await supabase
         .from('purchase_items')
-        .select('id, product_name, quantity, unit_cost, total_cost')
+        .select('id, product_name, quantity, unit_cost')
         .eq('purchase_id', purchase.id)
         .order('product_name')
 
@@ -647,7 +646,7 @@ function DetalleCompraModal({
                       <p className="text-sm font-medium text-stone-800 truncate">{item.product_name}</p>
                       <p className="text-sm text-center text-stone-600">{item.quantity}</p>
                       <p className="text-sm text-right text-stone-600">{formatCurrency(item.unit_cost)}</p>
-                      <p className="text-sm text-right font-semibold text-stone-800">{formatCurrency(item.total_cost)}</p>
+                      <p className="text-sm text-right font-semibold text-stone-800">{formatCurrency(item.quantity * item.unit_cost)}</p>
                     </div>
                   ))}
                 </div>
