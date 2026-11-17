@@ -581,19 +581,23 @@ function DetalleCompraModal({
     }
     setSaving(true)
     setSaveError('')
-    const { error } = await supabase.from('purchase_items').insert({
-      purchase_id: purchase.id,
-      product_name: newName.trim(),
-      quantity: qty,
-      unit_cost: cost,
-      subtotal: qty * cost,
-    })
+    const { data: inserted, error } = await supabase
+      .from('purchase_items')
+      .insert({
+        purchase_id: purchase.id,
+        product_name: newName.trim(),
+        quantity: qty,
+        unit_cost: cost,
+        subtotal: qty * cost,
+      })
+      .select('id, product_name, quantity, unit_cost')
+      .single()
     if (error) {
       setSaveError(`${error.code}: ${error.message}`)
     } else {
+      setItems(prev => [...prev, inserted as PurchaseItemDetail])
       setNewName(''); setNewQty(''); setNewCost('')
       setShowAddForm(false)
-      await loadItems()
     }
     setSaving(false)
   }
