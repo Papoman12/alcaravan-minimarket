@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency } from '@/lib/utils'
-import { getColombiaDate, formatColombiaDateTime } from '@/lib/colombia-time'
+import { getColombiaDate } from '@/lib/colombia-time'
 
 interface Expense {
   id: string
@@ -11,6 +11,7 @@ interface Expense {
   amount: number
   category: string
   payment_method: string
+  date: string
   created_at: string
   notes?: string
 }
@@ -28,20 +29,59 @@ const CATEGORIES = [
 ]
 
 const PAYMENT_ICONS: Record<string, string> = {
-  cash: '💵 Efectivo',
-  nequi: '📱 Nequi',
+  cash:     '💵 Efectivo',
+  nequi:    '📱 Nequi',
   transfer: '🏦 Transferencia',
-  card: '💳 Tarjeta',
+  card:     '💳 Tarjeta',
 }
 
+type Period = 'today' | 'yesterday' | '7d' | '30d' | 'all'
+
+const PERIODS: { key: Period; label: string }[] = [
+  { key: 'today',     label: 'Hoy'      },
+  { key: 'yesterday', label: 'Ayer'     },
+  { key: '7d',        label: '7 días'   },
+  { key: '30d',       label: '30 días'  },
+  { key: 'all',       label: 'Todo'     },
+]
+
+function getDateRange(period: Period): { from: string; to: string } | null {
+  const today = getColombiaDate()
+  if (period === 'all') return null
+  if (period === 'today') return { from: today, to: today }
+  if (period === 'yesterday') {
+    const d = new Date(today + 'T00:00:00')
+    d.setDate(d.getDate() - 1)
+    const y = d.toISOString().split('T')[0]
+    return { from: y, to: y }
+  }
+  const days = period === '7d' ? 7 : 30
+  const d = new Date(today + 'T00:00:00')
+  d.setDate(d.getDate() - (days - 1))
+  return { from: d.toISOString().split('T')[0], to: today }
+}
+
+function formatDateLabel(dateStr: string): string {
+  const today = getColombiaDate()
+  const yesterday = (() => {
+    const d = new Date(today + 'T00:00:00')
+    d.setDate(d.getDate() - 1)
+    return d.toISOString().split('T')[0]
+  })()
+  if (dateStr === today) return 'Hoy'
+  if (dateStr === yesterday) return 'Ayer'
+  return new Date(dateStr + 'T12:00:00').toLocaleDateString('es-CO', {
+    weekday: 'long', day: '2-digit', month: 'long',
+  })
+}
+
+// ─── Modal nuevo gasto ─────────────────────────────────────────────────────────
 function NuevoGastoModal({
   onClose,
   onSaved,
-  defaultDate,
 }: {
   onClose: () => void
   onSaved: () => void
-  defaultDate: string
 }) {
   const supabase = createClient()
   const [form, setForm] = useState({
@@ -50,7 +90,7 @@ function NuevoGastoModal({
     category: 'Otros',
     payment_method: 'cash',
     notes: '',
-    date: defaultDate,
+    date: getColombiaDate(),
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -65,17 +105,17 @@ function NuevoGastoModal({
     try {
       const { error: err } = await supabase.from('expenses').insert({
         description: form.description.trim(),
-        amount: parseFloat(form.amount),
-        category: form.category,
+        amount:      parseFloat(form.amount),
+        category:    form.category,
         payment_method: form.payment_method,
         notes: form.notes || null,
-        date: form.date,
+        date:  form.date,
       })
       if (err) throw err
       onSaved()
     } catch (e) {
       console.error(e)
-      setError('Error al guardar. Verifica que la tabla expenses exista.')
+      setError('Error al guardar.')
     }
     setSaving(false)
   }
@@ -193,24 +233,23 @@ function NuevoGastoModal({
   )
 }
 
+// ─── Página principal ──────────────────────────────────────────────────────────
 export default function GastosPage() {
   const supabase = createClient()
-  const [expenses, setExpenses] = useState<Expense[]>([])
-  const [loading, setLoading] = useState(true)
+  const [expenses, setExpenses]   = useState<Expense[]>([])
+  const [loading, setLoading]     = useState(true)
   const [showModal, setShowModal] = useState(false)
-  const [filterDate, setFilterDate] = useState(getColombiaDate())
+  const [period, setPeriod]       = useState<Period>('7d')
+  const [catFilter, setCatFilter] = useState<string>('all')
 
-  useEffect(() => {
-    load()
-  }, [filterDate]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load() }, [period]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function load() {
     setLoading(true)
-    const { data } = await supabase
-      .from('expenses')
-      .select('*')
-      .eq('date', filterDate)
-      .order('created_at', { ascending: false })
+    const range = getDateRange(period)
+    let q = supabase.from('expenses').select('*').order('date', { ascending: false }).order('created_at', { ascending: false })
+    if (range) q = q.gte('date', range.from).lte('date', range.to)
+    const { data } = await q
     setExpenses((data ?? []) as Expense[])
     setLoading(false)
   }
@@ -221,83 +260,170 @@ export default function GastosPage() {
     load()
   }
 
-  const totalEfectivo = expenses.filter(e => e.payment_method === 'cash').reduce((s, e) => s + e.amount, 0)
-  const totalNequi = expenses.filter(e => e.payment_method === 'nequi').reduce((s, e) => s + e.amount, 0)
-  const totalDia = expenses.reduce((s, e) => s + e.amount, 0)
+  // Filtro por categoría
+  const filtered = useMemo(
+    () => catFilter === 'all' ? expenses : expenses.filter(e => e.category === catFilter),
+    [expenses, catFilter]
+  )
+
+  // Totales del período filtrado
+  const totalPeriod  = filtered.reduce((s, e) => s + e.amount, 0)
+  const totalEfectivo = filtered.filter(e => e.payment_method === 'cash').reduce((s, e) => s + e.amount, 0)
+  const totalNequi   = filtered.filter(e => e.payment_method === 'nequi').reduce((s, e) => s + e.amount, 0)
+  const totalTransfer = filtered.filter(e => e.payment_method === 'transfer').reduce((s, e) => s + e.amount, 0)
+
+  // Resumen por categoría (del período, sin filtro de cat para mostrarlo completo)
+  const catSummary = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const e of expenses) map.set(e.category, (map.get(e.category) ?? 0) + e.amount)
+    return [...map.entries()].sort((a, b) => b[1] - a[1])
+  }, [expenses])
+
+  // Agrupar por fecha
+  const byDate = useMemo(() => {
+    const map = new Map<string, Expense[]>()
+    for (const e of filtered) {
+      const list = map.get(e.date) ?? []
+      list.push(e)
+      map.set(e.date, list)
+    }
+    return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]))
+  }, [filtered])
+
+  const usedCategories = [...new Set(expenses.map(e => e.category))]
 
   return (
     <div className="p-4 max-w-4xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+      <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-stone-800">Gastos</h1>
           <p className="text-stone-500 text-sm mt-0.5">Egresos operativos del negocio</p>
         </div>
-        <div className="flex gap-3 items-center">
-          <input
-            type="date"
-            value={filterDate}
-            onChange={e => setFilterDate(e.target.value)}
-            className="px-3 py-2 rounded-xl border border-stone-200 text-sm text-stone-700 focus:outline-none focus:ring-2 focus:ring-amber-700"
-          />
+        <button
+          onClick={() => setShowModal(true)}
+          className="px-4 py-2.5 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 transition-colors shadow-lg shadow-amber-700/20"
+        >
+          + Nuevo Gasto
+        </button>
+      </div>
+
+      {/* Filtros de período */}
+      <div className="flex gap-2 mb-5 flex-wrap">
+        {PERIODS.map(p => (
           <button
-            onClick={() => setShowModal(true)}
-            className="px-4 py-2 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 transition-colors shadow-lg shadow-amber-700/20"
+            key={p.key}
+            onClick={() => setPeriod(p.key)}
+            className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
+              period === p.key
+                ? 'bg-amber-700 text-white border-amber-700 shadow-sm'
+                : 'bg-white text-stone-600 border-stone-200 hover:border-amber-300'
+            }`}
           >
-            + Nuevo Gasto
+            {p.label}
           </button>
+        ))}
+      </div>
+
+      {/* KPIs del período */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+        <div className="bg-white rounded-2xl border border-stone-200 p-4 col-span-2 sm:col-span-1">
+          <p className="text-xs text-stone-500 font-medium uppercase tracking-wide">Total período</p>
+          <p className="text-xl font-bold text-red-600 mt-1">{formatCurrency(totalPeriod)}</p>
+          <p className="text-xs text-stone-400 mt-0.5">{filtered.length} gastos</p>
+        </div>
+        <div className="bg-white rounded-2xl border border-stone-200 p-4">
+          <p className="text-xs text-stone-500 font-medium uppercase tracking-wide">💵 Efectivo</p>
+          <p className="text-lg font-bold text-stone-800 mt-1">{formatCurrency(totalEfectivo)}</p>
+        </div>
+        <div className="bg-white rounded-2xl border border-stone-200 p-4">
+          <p className="text-xs text-stone-500 font-medium uppercase tracking-wide">📱 Nequi</p>
+          <p className="text-lg font-bold text-stone-800 mt-1">{formatCurrency(totalNequi)}</p>
+        </div>
+        <div className="bg-white rounded-2xl border border-stone-200 p-4">
+          <p className="text-xs text-stone-500 font-medium uppercase tracking-wide">🏦 Transferencia</p>
+          <p className="text-lg font-bold text-stone-800 mt-1">{formatCurrency(totalTransfer)}</p>
         </div>
       </div>
 
-      {/* Resumen del día */}
-      <div className="grid grid-cols-3 gap-3 mb-5">
-        <div className="bg-white rounded-2xl border border-stone-200 p-4">
-          <p className="text-xs text-stone-500 font-medium uppercase tracking-wide">Total del día</p>
-          <p className="text-xl font-bold text-red-600 mt-1">{formatCurrency(totalDia)}</p>
+      {/* Resumen por categoría */}
+      {catSummary.length > 0 && (
+        <div className="bg-white rounded-2xl border border-stone-200 p-4 mb-5">
+          <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide mb-3">Por categoría</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setCatFilter('all')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                catFilter === 'all'
+                  ? 'bg-amber-700 text-white border-amber-700'
+                  : 'bg-stone-50 text-stone-600 border-stone-200 hover:border-amber-300'
+              }`}
+            >
+              Todos · {formatCurrency(expenses.reduce((s, e) => s + e.amount, 0))}
+            </button>
+            {catSummary.map(([cat, total]) => (
+              <button
+                key={cat}
+                onClick={() => setCatFilter(catFilter === cat ? 'all' : cat)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                  catFilter === cat
+                    ? 'bg-amber-700 text-white border-amber-700'
+                    : 'bg-stone-50 text-stone-600 border-stone-200 hover:border-amber-300'
+                }`}
+              >
+                {cat} · {formatCurrency(total)}
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="bg-white rounded-2xl border border-stone-200 p-4">
-          <p className="text-xs text-stone-500 font-medium uppercase tracking-wide">💵 En efectivo</p>
-          <p className="text-xl font-bold text-stone-800 mt-1">{formatCurrency(totalEfectivo)}</p>
-        </div>
-        <div className="bg-white rounded-2xl border border-stone-200 p-4">
-          <p className="text-xs text-stone-500 font-medium uppercase tracking-wide">📱 Por Nequi</p>
-          <p className="text-xl font-bold text-stone-800 mt-1">{formatCurrency(totalNequi)}</p>
-        </div>
-      </div>
+      )}
 
-      {/* Lista */}
+      {/* Lista agrupada por fecha */}
       {loading ? (
         <div className="flex justify-center py-16">
           <div className="w-8 h-8 border-4 border-amber-700 border-t-transparent rounded-full animate-spin" />
         </div>
-      ) : expenses.length === 0 ? (
+      ) : byDate.length === 0 ? (
         <div className="text-center py-16">
           <p className="text-5xl mb-3">💸</p>
-          <p className="text-stone-500">No hay gastos registrados para este día</p>
+          <p className="text-stone-500">No hay gastos en este período</p>
         </div>
       ) : (
-        <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden">
-          <div className="divide-y divide-stone-100">
-            {expenses.map(e => (
-              <div key={e.id} className="flex items-center gap-3 px-4 py-3 hover:bg-stone-50 transition-colors">
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-stone-800 text-sm">{e.description}</p>
-                  <p className="text-xs text-stone-400 mt-0.5">
-                    {e.category} · {PAYMENT_ICONS[e.payment_method] ?? e.payment_method} · {formatColombiaDateTime(e.created_at)}
-                  </p>
-                  {e.notes && <p className="text-xs text-stone-400 italic">{e.notes}</p>}
+        <div className="space-y-4">
+          {byDate.map(([date, dayExpenses]) => {
+            const dayTotal = dayExpenses.reduce((s, e) => s + e.amount, 0)
+            return (
+              <div key={date} className="bg-white rounded-2xl border border-stone-200 overflow-hidden">
+                {/* Cabecera del día */}
+                <div className="flex items-center justify-between px-4 py-2.5 bg-stone-50 border-b border-stone-100">
+                  <p className="text-sm font-semibold text-stone-700 capitalize">{formatDateLabel(date)}</p>
+                  <p className="text-sm font-bold text-red-600">{formatCurrency(dayTotal)}</p>
                 </div>
-                <p className="font-bold text-red-600 text-sm whitespace-nowrap">{formatCurrency(e.amount)}</p>
-                <button
-                  onClick={() => handleDelete(e.id)}
-                  className="text-stone-300 hover:text-red-500 transition-colors px-1 text-sm"
-                  title="Eliminar"
-                >
-                  🗑
-                </button>
+                {/* Gastos del día */}
+                <div className="divide-y divide-stone-100">
+                  {dayExpenses.map(e => (
+                    <div key={e.id} className="flex items-center gap-3 px-4 py-3 hover:bg-stone-50 transition-colors">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-stone-800 text-sm">{e.description}</p>
+                        <p className="text-xs text-stone-400 mt-0.5">
+                          {e.category} · {PAYMENT_ICONS[e.payment_method] ?? e.payment_method}
+                        </p>
+                        {e.notes && <p className="text-xs text-amber-700 italic mt-0.5">{e.notes}</p>}
+                      </div>
+                      <p className="font-bold text-red-600 text-sm whitespace-nowrap">{formatCurrency(e.amount)}</p>
+                      <button
+                        onClick={() => handleDelete(e.id)}
+                        className="text-stone-300 hover:text-red-500 transition-colors px-1 text-sm"
+                        title="Eliminar"
+                      >
+                        🗑
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
-            ))}
-          </div>
+            )
+          })}
         </div>
       )}
 
@@ -305,7 +431,6 @@ export default function GastosPage() {
         <NuevoGastoModal
           onClose={() => setShowModal(false)}
           onSaved={() => { setShowModal(false); load() }}
-          defaultDate={filterDate}
         />
       )}
     </div>
