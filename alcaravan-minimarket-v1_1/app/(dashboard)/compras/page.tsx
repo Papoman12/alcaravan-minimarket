@@ -544,25 +544,62 @@ function DetalleCompraModal({
   const [tableError, setTableError] = useState(false)
   const [tableErrorMsg, setTableErrorMsg] = useState('')
 
-  useEffect(() => {
-    async function loadItems() {
-      const { data, error } = await supabase
-        .from('purchase_items')
-        .select('id, product_name, quantity, unit_cost')
-        .eq('purchase_id', purchase.id)
-        .order('product_name')
+  // formulario agregar producto
+  const [showAddForm, setShowAddForm] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newQty, setNewQty] = useState('')
+  const [newCost, setNewCost] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
 
-      if (error) {
-        console.error('purchase_items error:', error)
-        setTableError(true)
-        setTableErrorMsg(`${error.code ?? ''}: ${error.message ?? JSON.stringify(error)}`)
-      } else {
-        setItems((data ?? []) as PurchaseItemDetail[])
-      }
-      setLoading(false)
+  async function loadItems() {
+    const { data, error } = await supabase
+      .from('purchase_items')
+      .select('id, product_name, quantity, unit_cost')
+      .eq('purchase_id', purchase.id)
+      .order('product_name')
+
+    if (error) {
+      console.error('purchase_items error:', error)
+      setTableError(true)
+      setTableErrorMsg(`${error.code ?? ''}: ${error.message ?? JSON.stringify(error)}`)
+    } else {
+      setItems((data ?? []) as PurchaseItemDetail[])
     }
-    loadItems()
-  }, [purchase.id]) // eslint-disable-line react-hooks/exhaustive-deps
+    setLoading(false)
+  }
+
+  useEffect(() => { loadItems() }, [purchase.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleAddItem() {
+    const qty = parseFloat(newQty)
+    const cost = parseFloat(newCost.replace(/,/g, '.'))
+    if (!newName.trim() || isNaN(qty) || qty <= 0 || isNaN(cost) || cost < 0) {
+      setSaveError('Completa todos los campos correctamente.')
+      return
+    }
+    setSaving(true)
+    setSaveError('')
+    const { error } = await supabase.from('purchase_items').insert({
+      purchase_id: purchase.id,
+      product_name: newName.trim(),
+      quantity: qty,
+      unit_cost: cost,
+    })
+    if (error) {
+      setSaveError(`${error.code}: ${error.message}`)
+    } else {
+      setNewName(''); setNewQty(''); setNewCost('')
+      setShowAddForm(false)
+      await loadItems()
+    }
+    setSaving(false)
+  }
+
+  async function handleDeleteItem(id: string) {
+    await supabase.from('purchase_items').delete().eq('id', id)
+    setItems(prev => prev.filter(i => i.id !== id))
+  }
 
   const statusLabel: Record<string, { label: string; color: string }> = {
     pending:   { label: 'Pendiente',  color: 'bg-yellow-100 text-yellow-700' },
@@ -617,7 +654,60 @@ function DetalleCompraModal({
 
           {/* Productos */}
           <div>
-            <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide mb-2">Productos incluidos</p>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide">Productos incluidos</p>
+              {!tableError && !loading && (
+                <button
+                  onClick={() => { setShowAddForm(v => !v); setSaveError('') }}
+                  className="text-xs px-3 py-1 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors font-medium"
+                >
+                  {showAddForm ? 'Cancelar' : '+ Agregar producto'}
+                </button>
+              )}
+            </div>
+
+            {/* Formulario agregar */}
+            {showAddForm && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-3 space-y-3">
+                <p className="text-xs font-semibold text-amber-800">Nuevo producto (desde tu factura)</p>
+                <input
+                  type="text"
+                  placeholder="Nombre del producto"
+                  value={newName}
+                  onChange={e => setNewName(e.target.value)}
+                  className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                />
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="number"
+                    placeholder="Cantidad"
+                    value={newQty}
+                    onChange={e => setNewQty(e.target.value)}
+                    min="0"
+                    step="0.01"
+                    className="border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  />
+                  <input
+                    type="number"
+                    placeholder="Costo unitario"
+                    value={newCost}
+                    onChange={e => setNewCost(e.target.value)}
+                    min="0"
+                    step="0.01"
+                    className="border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  />
+                </div>
+                {saveError && <p className="text-xs text-red-600">{saveError}</p>}
+                <button
+                  onClick={handleAddItem}
+                  disabled={saving}
+                  className="w-full py-2 bg-amber-600 text-white rounded-lg text-sm font-semibold hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                >
+                  {saving ? 'Guardando…' : 'Guardar producto'}
+                </button>
+              </div>
+            )}
+
             {loading ? (
               <div className="flex justify-center py-6">
                 <div className="w-6 h-6 border-2 border-amber-700 border-t-transparent rounded-full animate-spin" />
@@ -629,27 +719,33 @@ function DetalleCompraModal({
                 <p className="text-xs text-stone-500">Copia ese mensaje y envíaselo a tu desarrollador o compártelo aquí para resolverlo.</p>
               </div>
             ) : items.length === 0 ? (
-              <p className="text-sm text-stone-400 text-center py-4">Esta compra no tiene detalle de productos guardado (fue registrada antes de que se implementara esta función).</p>
+              <p className="text-sm text-stone-400 text-center py-4 italic">Sin productos registrados. Usa "+ Agregar producto" para ingresar el detalle desde tu factura.</p>
             ) : (
               <div className="border border-stone-200 rounded-xl overflow-hidden">
-                <div className="bg-stone-50 px-3 py-2 grid grid-cols-[2fr_1fr_1fr_1fr] gap-2 text-xs font-semibold text-stone-500 uppercase">
+                <div className="bg-stone-50 px-3 py-2 grid grid-cols-[2fr_1fr_1fr_1fr_auto] gap-2 text-xs font-semibold text-stone-500 uppercase">
                   <span>Producto</span>
                   <span className="text-center">Cant.</span>
                   <span className="text-right">C. Unit.</span>
                   <span className="text-right">Subtotal</span>
+                  <span />
                 </div>
                 <div className="divide-y divide-stone-100">
                   {items.map(item => (
-                    <div key={item.id} className="px-3 py-2.5 grid grid-cols-[2fr_1fr_1fr_1fr] gap-2 items-center">
+                    <div key={item.id} className="px-3 py-2.5 grid grid-cols-[2fr_1fr_1fr_1fr_auto] gap-2 items-center">
                       <p className="text-sm font-medium text-stone-800 truncate">{item.product_name}</p>
                       <p className="text-sm text-center text-stone-600">{item.quantity}</p>
                       <p className="text-sm text-right text-stone-600">{formatCurrency(item.unit_cost)}</p>
                       <p className="text-sm text-right font-semibold text-stone-800">{formatCurrency(item.quantity * item.unit_cost)}</p>
+                      <button
+                        onClick={() => handleDeleteItem(item.id)}
+                        className="text-stone-300 hover:text-red-500 transition-colors text-lg leading-none"
+                        title="Eliminar"
+                      >×</button>
                     </div>
                   ))}
                 </div>
                 <div className="bg-amber-50 px-3 py-2.5 flex justify-between border-t border-stone-200">
-                  <span className="text-sm font-semibold text-stone-700">Total</span>
+                  <span className="text-sm font-semibold text-stone-700">Total registrado</span>
                   <span className="text-lg font-bold text-amber-800">{formatCurrency(purchase.total)}</span>
                 </div>
               </div>
