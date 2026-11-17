@@ -347,6 +347,150 @@ function NuevaCompraModal({
   )
 }
 
+// ─── Modal Detalle Compra ─────────────────────────────────────────────────────
+interface PurchaseDetail {
+  id: string
+  purchase_number: string
+  total: number
+  status: string
+  payment_method?: string
+  created_at: string
+  notes?: string
+  supplier?: { name: string }
+}
+
+interface PurchaseItemDetail {
+  id: string
+  product_name: string
+  quantity: number
+  unit_cost: number
+  total_cost: number
+}
+
+function DetalleCompraModal({
+  purchase,
+  onClose,
+}: {
+  purchase: PurchaseDetail
+  onClose: () => void
+}) {
+  const supabase = createClient()
+  const [items, setItems] = useState<PurchaseItemDetail[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function loadItems() {
+      const { data } = await supabase
+        .from('purchase_items')
+        .select('id, product_name, quantity, unit_cost, total_cost')
+        .eq('purchase_id', purchase.id)
+        .order('product_name')
+      setItems((data ?? []) as PurchaseItemDetail[])
+      setLoading(false)
+    }
+    loadItems()
+  }, [purchase.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const statusLabel: Record<string, { label: string; color: string }> = {
+    pending:   { label: 'Pendiente',  color: 'bg-yellow-100 text-yellow-700' },
+    received:  { label: 'Recibida',   color: 'bg-emerald-100 text-emerald-700' },
+    cancelled: { label: 'Cancelada',  color: 'bg-red-100 text-red-600' },
+  }
+  const st = statusLabel[purchase.status] ?? { label: purchase.status, color: 'bg-stone-100 text-stone-600' }
+
+  const payLabel: Record<string, string> = {
+    cash: '💵 Efectivo', nequi: '📱 Nequi',
+    transfer: '🏦 Transferencia', credit: '📋 Crédito',
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg my-4">
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b border-stone-100">
+          <div>
+            <h3 className="text-lg font-bold text-stone-800">Detalle de Compra</h3>
+            <p className="text-sm font-mono text-stone-400">{purchase.purchase_number}</p>
+          </div>
+          <button onClick={onClose} className="text-stone-400 hover:text-stone-600 text-2xl leading-none">&times;</button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {/* Info cabecera */}
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className="bg-stone-50 rounded-xl p-3">
+              <p className="text-xs text-stone-400 font-medium uppercase tracking-wide mb-0.5">Proveedor</p>
+              <p className="font-semibold text-stone-800">{(purchase.supplier as { name?: string } | undefined)?.name ?? '—'}</p>
+            </div>
+            <div className="bg-stone-50 rounded-xl p-3">
+              <p className="text-xs text-stone-400 font-medium uppercase tracking-wide mb-0.5">Fecha</p>
+              <p className="font-semibold text-stone-800">{formatDate(purchase.created_at)}</p>
+            </div>
+            <div className="bg-stone-50 rounded-xl p-3">
+              <p className="text-xs text-stone-400 font-medium uppercase tracking-wide mb-0.5">Estado</p>
+              <span className={`text-xs px-2 py-1 rounded-full font-medium ${st.color}`}>{st.label}</span>
+            </div>
+            <div className="bg-stone-50 rounded-xl p-3">
+              <p className="text-xs text-stone-400 font-medium uppercase tracking-wide mb-0.5">Pago</p>
+              <p className="font-semibold text-stone-800">{payLabel[purchase.payment_method ?? ''] ?? '—'}</p>
+            </div>
+          </div>
+
+          {purchase.notes && (
+            <div className="bg-amber-50 rounded-xl p-3 text-sm text-amber-800">
+              <span className="font-medium">Notas:</span> {purchase.notes}
+            </div>
+          )}
+
+          {/* Productos */}
+          <div>
+            <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide mb-2">Productos incluidos</p>
+            {loading ? (
+              <div className="flex justify-center py-6">
+                <div className="w-6 h-6 border-2 border-amber-700 border-t-transparent rounded-full animate-spin" />
+              </div>
+            ) : items.length === 0 ? (
+              <p className="text-sm text-stone-400 text-center py-4">Sin detalle de productos registrado</p>
+            ) : (
+              <div className="border border-stone-200 rounded-xl overflow-hidden">
+                <div className="bg-stone-50 px-3 py-2 grid grid-cols-[2fr_1fr_1fr_1fr] gap-2 text-xs font-semibold text-stone-500 uppercase">
+                  <span>Producto</span>
+                  <span className="text-center">Cant.</span>
+                  <span className="text-right">C. Unit.</span>
+                  <span className="text-right">Subtotal</span>
+                </div>
+                <div className="divide-y divide-stone-100">
+                  {items.map(item => (
+                    <div key={item.id} className="px-3 py-2.5 grid grid-cols-[2fr_1fr_1fr_1fr] gap-2 items-center">
+                      <p className="text-sm font-medium text-stone-800 truncate">{item.product_name}</p>
+                      <p className="text-sm text-center text-stone-600">{item.quantity}</p>
+                      <p className="text-sm text-right text-stone-600">{formatCurrency(item.unit_cost)}</p>
+                      <p className="text-sm text-right font-semibold text-stone-800">{formatCurrency(item.total_cost)}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="bg-amber-50 px-3 py-2.5 flex justify-between border-t border-stone-200">
+                  <span className="text-sm font-semibold text-stone-700">Total</span>
+                  <span className="text-lg font-bold text-amber-800">{formatCurrency(purchase.total)}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="p-5 border-t border-stone-100">
+          <button
+            onClick={onClose}
+            className="w-full py-2.5 border border-stone-200 rounded-xl text-stone-600 hover:bg-stone-50 transition-colors font-medium"
+          >
+            Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Página principal ─────────────────────────────────────────────────────────
 export default function ComprasPage() {
   const supabase = createClient()
@@ -355,6 +499,7 @@ export default function ComprasPage() {
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [detallePurchase, setDetallePurchase] = useState<PurchaseDetail | null>(null)
 
   useEffect(() => {
     load()
@@ -494,14 +639,23 @@ export default function ComprasPage() {
                     </td>
                     <td className="px-4 py-3 text-right font-bold text-stone-800">{formatCurrency(p.total)}</td>
                     <td className="px-4 py-3 text-right">
-                      <button
-                        onClick={() => handleDelete(p)}
-                        disabled={isDeleting}
-                        className="text-stone-300 hover:text-red-500 transition-colors disabled:opacity-50 text-sm px-2 py-1 rounded-lg hover:bg-red-50"
-                        title="Eliminar compra"
-                      >
-                        {isDeleting ? '...' : '🗑'}
-                      </button>
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => setDetallePurchase(p as unknown as PurchaseDetail)}
+                          className="text-stone-400 hover:text-amber-700 transition-colors text-sm px-2 py-1 rounded-lg hover:bg-amber-50"
+                          title="Ver detalle"
+                        >
+                          👁
+                        </button>
+                        <button
+                          onClick={() => handleDelete(p)}
+                          disabled={isDeleting}
+                          className="text-stone-300 hover:text-red-500 transition-colors disabled:opacity-50 text-sm px-2 py-1 rounded-lg hover:bg-red-50"
+                          title="Eliminar compra"
+                        >
+                          {isDeleting ? '...' : '🗑'}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 )
@@ -519,6 +673,13 @@ export default function ComprasPage() {
             setShowModal(false)
             load()
           }}
+        />
+      )}
+
+      {detallePurchase && (
+        <DetalleCompraModal
+          purchase={detallePurchase}
+          onClose={() => setDetallePurchase(null)}
         />
       )}
     </div>
