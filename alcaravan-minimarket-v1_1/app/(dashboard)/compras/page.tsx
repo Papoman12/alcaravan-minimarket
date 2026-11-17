@@ -140,14 +140,12 @@ function NuevaCompraModal({
         product_name: i.product.name,
         quantity: i.quantity,
         unit_cost: i.unit_cost,
-        total_cost: i.quantity * i.unit_cost,
       }))
 
-      await Promise.resolve(
-        supabase.from('purchase_items').insert(purchaseLines)
-      ).catch(() => {
-        // Si la tabla no existe aún, seguimos de todos modos
-      })
+      const { error: itemsError } = await supabase.from('purchase_items').insert(purchaseLines)
+      if (itemsError) {
+        console.error('Error guardando detalle de compra:', itemsError)
+      }
 
       // 3. Actualizar stock de cada producto
       for (const item of items) {
