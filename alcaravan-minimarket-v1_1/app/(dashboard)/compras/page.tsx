@@ -10,6 +10,8 @@ interface Purchase {
   total: number
   status: string
   payment_method?: string
+  paid_at?: string       // null = crédito pendiente de pago
+  paid_with?: string     // método con el que se canceló el crédito
   created_at: string
   notes?: string
   supplier?: { name: string }
@@ -347,6 +349,171 @@ function NuevaCompraModal({
   )
 }
 
+// ─── Modal Pagar Crédito ──────────────────────────────────────────────────────
+function PagarCreditoModal({
+  purchase,
+  onClose,
+  onPaid,
+}: {
+  purchase: Purchase
+  onClose: () => void
+  onPaid: () => void
+}) {
+  const supabase = createClient()
+  const [method, setMethod] = useState('cash')
+  const [amount, setAmount] = useState(purchase.total)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const methods = [
+    { key: 'cash',     label: '💵 Efectivo' },
+    { key: 'nequi',    label: '📱 Nequi' },
+    { key: 'transfer', label: '🏦 Transferencia' },
+  ]
+
+  async function handlePay() {
+    if (amount <= 0) { setError('El valor debe ser mayor a 0'); return }
+    setSaving(true)
+    setError('')
+
+    try {
+      // 1. Marcar la compra como pagada
+      const { error: updErr } = await supabase
+        .from('purchases')
+        .update({ paid_at: new Date().toISOString(), paid_with: method })
+        .eq('id', purchase.id)
+      if (updErr) throw updErr
+
+      // 2. Si es efectivo, registrar salida en caja (si hay sesión abierta)
+      if (method === 'cash') {
+        const { data: session } = await supabase
+          .from('caja_sessions')
+          .select('id')
+          .eq('status', 'open')
+          .order('opened_at', { ascending: false })
+          .limit(1)
+          .single()
+
+        if (session) {
+          await supabase.from('caja_movements').insert({
+            session_id: session.id,
+            type: 'out',
+            amount,
+            description: `Pago compra ${purchase.purchase_number}${purchase.supplier ? ' — ' + (purchase.supplier as { name?: string }).name : ''}`,
+            payment_method: 'cash',
+          })
+        }
+      }
+
+      onPaid()
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      // Si paid_at/paid_with no existen aún, mostrar SQL
+      if (msg.includes('paid_at') || msg.includes('paid_with') || msg.includes('column')) {
+        setError('SCHEMA: Ejecuta este SQL en Supabase primero:\n\nALTER TABLE purchases\n  ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ,\n  ADD COLUMN IF NOT EXISTS paid_with TEXT;')
+      } else {
+        setError('Error al registrar el pago. Intenta de nuevo.')
+      }
+    }
+    setSaving(false)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b border-stone-100">
+          <div>
+            <h3 className="text-lg font-bold text-stone-800">Registrar Pago</h3>
+            <p className="text-sm font-mono text-stone-400">{purchase.purchase_number}</p>
+          </div>
+          <button onClick={onClose} className="text-stone-400 hover:text-stone-600 text-2xl leading-none">&times;</button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {/* Proveedor y total */}
+          <div className="bg-amber-50 rounded-xl p-3 flex justify-between items-center">
+            <div>
+              <p className="text-xs text-stone-500">Proveedor</p>
+              <p className="font-semibold text-stone-800">{(purchase.supplier as { name?: string } | undefined)?.name ?? '—'}</p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-stone-500">Total compra</p>
+              <p className="text-lg font-bold text-amber-800">{formatCurrency(purchase.total)}</p>
+            </div>
+          </div>
+
+          {/* Valor a pagar */}
+          <div>
+            <label className="block text-sm font-medium text-stone-700 mb-1">Valor a pagar</label>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={amount}
+              onChange={e => setAmount(parseFloat(e.target.value) || 0)}
+              className="w-full px-3 py-2.5 rounded-xl border border-stone-200 text-stone-800 text-right font-bold text-lg focus:outline-none focus:ring-2 focus:ring-amber-700"
+            />
+          </div>
+
+          {/* Método de pago */}
+          <div>
+            <label className="block text-sm font-medium text-stone-700 mb-1">Pagar con</label>
+            <div className="grid grid-cols-3 gap-2">
+              {methods.map(m => (
+                <button
+                  key={m.key}
+                  type="button"
+                  onClick={() => setMethod(m.key)}
+                  className={`py-2.5 px-2 rounded-xl text-sm font-medium text-center transition-all border ${
+                    method === m.key
+                      ? 'bg-amber-700 text-white border-amber-700'
+                      : 'bg-stone-50 text-stone-600 border-stone-200 hover:border-amber-300'
+                  }`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            {method === 'cash' && (
+              <p className="text-xs text-stone-400 mt-1.5">Se registrará como salida en la caja si hay una sesión abierta.</p>
+            )}
+          </div>
+
+          {error && (
+            <div className="bg-red-50 rounded-xl p-3">
+              {error.startsWith('SCHEMA:') ? (
+                <>
+                  <p className="text-sm font-semibold text-red-700 mb-2">⚠️ Faltan columnas en la base de datos</p>
+                  <pre className="text-xs text-red-600 font-mono bg-red-100 rounded-lg p-2 whitespace-pre-wrap overflow-x-auto">{error.replace('SCHEMA: ', '')}</pre>
+                </>
+              ) : (
+                <p className="text-sm text-red-600">{error}</p>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="flex gap-3 p-5 border-t border-stone-100">
+          <button
+            onClick={onClose}
+            className="flex-1 py-2.5 border border-stone-200 rounded-xl text-stone-600 hover:bg-stone-50 font-medium"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handlePay}
+            disabled={saving || amount <= 0}
+            className="flex-1 py-2.5 bg-emerald-600 text-white rounded-xl font-semibold hover:bg-emerald-700 disabled:bg-stone-300 transition-colors"
+          >
+            {saving ? 'Guardando...' : `✓ Registrar ${formatCurrency(amount)}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Modal Detalle Compra ─────────────────────────────────────────────────────
 interface PurchaseDetail {
   id: string
@@ -377,15 +544,23 @@ function DetalleCompraModal({
   const supabase = createClient()
   const [items, setItems] = useState<PurchaseItemDetail[]>([])
   const [loading, setLoading] = useState(true)
+  const [tableError, setTableError] = useState(false)
 
   useEffect(() => {
     async function loadItems() {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('purchase_items')
         .select('id, product_name, quantity, unit_cost, total_cost')
         .eq('purchase_id', purchase.id)
         .order('product_name')
-      setItems((data ?? []) as PurchaseItemDetail[])
+
+      if (error) {
+        console.error('purchase_items error:', error)
+        // La tabla no existe o no tiene permisos
+        setTableError(true)
+      } else {
+        setItems((data ?? []) as PurchaseItemDetail[])
+      }
       setLoading(false)
     }
     loadItems()
@@ -449,8 +624,27 @@ function DetalleCompraModal({
               <div className="flex justify-center py-6">
                 <div className="w-6 h-6 border-2 border-amber-700 border-t-transparent rounded-full animate-spin" />
               </div>
+            ) : tableError ? (
+              <div className="bg-red-50 rounded-xl p-4 text-sm text-red-700 space-y-2">
+                <p className="font-semibold">⚠️ La tabla <code>purchase_items</code> no existe en Supabase.</p>
+                <p>Debes crearla ejecutando este SQL en Supabase → SQL Editor:</p>
+                <pre className="bg-red-100 rounded-lg p-3 text-xs overflow-x-auto whitespace-pre-wrap font-mono">{`CREATE TABLE IF NOT EXISTS purchase_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  purchase_id UUID REFERENCES purchases(id) ON DELETE CASCADE,
+  product_id UUID REFERENCES products(id),
+  product_name TEXT NOT NULL,
+  quantity NUMERIC NOT NULL DEFAULT 1,
+  unit_cost NUMERIC NOT NULL DEFAULT 0,
+  total_cost NUMERIC NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE purchase_items ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "auth_all" ON purchase_items
+  FOR ALL TO authenticated USING (true) WITH CHECK (true);`}</pre>
+                <p className="text-xs text-red-500">Después de crear la tabla, las compras nuevas guardarán el detalle de productos correctamente.</p>
+              </div>
             ) : items.length === 0 ? (
-              <p className="text-sm text-stone-400 text-center py-4">Sin detalle de productos registrado</p>
+              <p className="text-sm text-stone-400 text-center py-4">Esta compra no tiene detalle de productos guardado (fue registrada antes de que se implementara esta función).</p>
             ) : (
               <div className="border border-stone-200 rounded-xl overflow-hidden">
                 <div className="bg-stone-50 px-3 py-2 grid grid-cols-[2fr_1fr_1fr_1fr] gap-2 text-xs font-semibold text-stone-500 uppercase">
@@ -500,6 +694,7 @@ export default function ComprasPage() {
   const [showModal, setShowModal] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [detallePurchase, setDetallePurchase] = useState<PurchaseDetail | null>(null)
+  const [pagarPurchase, setPagarPurchase] = useState<Purchase | null>(null)
 
   useEffect(() => {
     load()
@@ -510,7 +705,7 @@ export default function ComprasPage() {
     const [{ data: p }, { data: s }] = await Promise.all([
       supabase
         .from('purchases')
-        .select('*, supplier:suppliers(name)')
+        .select('*, supplier:suppliers(name), paid_at, paid_with')
         .order('created_at', { ascending: false })
         .limit(50),
       supabase
@@ -560,9 +755,14 @@ export default function ComprasPage() {
   }
 
   const statusLabel: Record<string, { label: string; color: string }> = {
-    pending: { label: 'Pendiente', color: 'bg-yellow-100 text-yellow-700' },
-    received: { label: 'Recibida', color: 'bg-emerald-100 text-emerald-700' },
-    cancelled: { label: 'Cancelada', color: 'bg-red-100 text-red-600' },
+    pending:   { label: 'Pendiente',  color: 'bg-yellow-100 text-yellow-700' },
+    received:  { label: 'Recibida',   color: 'bg-emerald-100 text-emerald-700' },
+    cancelled: { label: 'Cancelada',  color: 'bg-red-100 text-red-600' },
+  }
+
+  const payLabel: Record<string, string> = {
+    cash: '💵 Efectivo', nequi: '📱 Nequi',
+    transfer: '🏦 Transf.', credit: '📋 Crédito',
   }
 
   const totalMes = purchases
@@ -631,15 +831,31 @@ export default function ComprasPage() {
                       <span className={`text-xs px-2 py-1 rounded-full font-medium ${st.color}`}>{st.label}</span>
                     </td>
                     <td className="px-4 py-3 text-sm text-stone-500">
-                      {p.payment_method === 'cash' ? '💵 Efectivo'
-                        : p.payment_method === 'nequi' ? '📱 Nequi'
-                        : p.payment_method === 'transfer' ? '🏦 Transferencia'
-                        : p.payment_method === 'credit' ? '📋 Crédito'
-                        : '—'}
+                      {p.payment_method === 'credit' ? (
+                        p.paid_at ? (
+                          <span className="flex flex-col gap-0.5">
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium w-fit">✓ Crédito pagado</span>
+                            <span className="text-xs text-stone-400">{payLabel[p.paid_with ?? ''] ?? p.paid_with}</span>
+                          </span>
+                        ) : (
+                          <span className="text-xs px-2 py-1 rounded-full bg-orange-100 text-orange-700 font-medium">⏳ Crédito pendiente</span>
+                        )
+                      ) : (
+                        payLabel[p.payment_method ?? ''] ?? '—'
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right font-bold text-stone-800">{formatCurrency(p.total)}</td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
+                        {p.payment_method === 'credit' && !p.paid_at && (
+                          <button
+                            onClick={() => setPagarPurchase(p)}
+                            className="text-xs px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-medium transition-colors"
+                            title="Registrar pago"
+                          >
+                            💳 Pagar
+                          </button>
+                        )}
                         <button
                           onClick={() => setDetallePurchase(p as unknown as PurchaseDetail)}
                           className="text-stone-400 hover:text-amber-700 transition-colors text-sm px-2 py-1 rounded-lg hover:bg-amber-50"
@@ -680,6 +896,14 @@ export default function ComprasPage() {
         <DetalleCompraModal
           purchase={detallePurchase}
           onClose={() => setDetallePurchase(null)}
+        />
+      )}
+
+      {pagarPurchase && (
+        <PagarCreditoModal
+          purchase={pagarPurchase}
+          onClose={() => setPagarPurchase(null)}
+          onPaid={() => { setPagarPurchase(null); load() }}
         />
       )}
     </div>
