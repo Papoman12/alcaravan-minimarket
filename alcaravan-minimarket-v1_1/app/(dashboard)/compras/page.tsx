@@ -140,6 +140,7 @@ function NuevaCompraModal({
         product_name: i.product.name,
         quantity: i.quantity,
         unit_cost: i.unit_cost,
+        subtotal: i.quantity * i.unit_cost,
       }))
 
       const { error: itemsError } = await supabase.from('purchase_items').insert(purchaseLines)
@@ -585,6 +586,7 @@ function DetalleCompraModal({
       product_name: newName.trim(),
       quantity: qty,
       unit_cost: cost,
+      subtotal: qty * cost,
     })
     if (error) {
       setSaveError(`${error.code}: ${error.message}`)
