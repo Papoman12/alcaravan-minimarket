@@ -545,6 +545,7 @@ function DetalleCompraModal({
   const [items, setItems] = useState<PurchaseItemDetail[]>([])
   const [loading, setLoading] = useState(true)
   const [tableError, setTableError] = useState(false)
+  const [tableErrorMsg, setTableErrorMsg] = useState('')
 
   useEffect(() => {
     async function loadItems() {
@@ -556,8 +557,8 @@ function DetalleCompraModal({
 
       if (error) {
         console.error('purchase_items error:', error)
-        // La tabla no existe o no tiene permisos
         setTableError(true)
+        setTableErrorMsg(`${error.code ?? ''}: ${error.message ?? JSON.stringify(error)}`)
       } else {
         setItems((data ?? []) as PurchaseItemDetail[])
       }
@@ -626,22 +627,9 @@ function DetalleCompraModal({
               </div>
             ) : tableError ? (
               <div className="bg-red-50 rounded-xl p-4 text-sm text-red-700 space-y-2">
-                <p className="font-semibold">⚠️ La tabla <code>purchase_items</code> no existe en Supabase.</p>
-                <p>Debes crearla ejecutando este SQL en Supabase → SQL Editor:</p>
-                <pre className="bg-red-100 rounded-lg p-3 text-xs overflow-x-auto whitespace-pre-wrap font-mono">{`CREATE TABLE IF NOT EXISTS purchase_items (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  purchase_id UUID REFERENCES purchases(id) ON DELETE CASCADE,
-  product_id UUID REFERENCES products(id),
-  product_name TEXT NOT NULL,
-  quantity NUMERIC NOT NULL DEFAULT 1,
-  unit_cost NUMERIC NOT NULL DEFAULT 0,
-  total_cost NUMERIC NOT NULL DEFAULT 0,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-ALTER TABLE purchase_items ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "auth_all" ON purchase_items
-  FOR ALL TO authenticated USING (true) WITH CHECK (true);`}</pre>
-                <p className="text-xs text-red-500">Después de crear la tabla, las compras nuevas guardarán el detalle de productos correctamente.</p>
+                <p className="font-semibold">⚠️ Error al leer <code>purchase_items</code></p>
+                <p className="font-mono text-xs bg-red-100 rounded-lg p-2 break-all">{tableErrorMsg}</p>
+                <p className="text-xs text-stone-500">Copia ese mensaje y envíaselo a tu desarrollador o compártelo aquí para resolverlo.</p>
               </div>
             ) : items.length === 0 ? (
               <p className="text-sm text-stone-400 text-center py-4">Esta compra no tiene detalle de productos guardado (fue registrada antes de que se implementara esta función).</p>
