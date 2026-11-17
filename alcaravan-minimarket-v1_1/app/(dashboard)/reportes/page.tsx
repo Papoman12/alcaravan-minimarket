@@ -10,7 +10,12 @@ interface SaleItemRow {
   total: number
   product_name: string
   product_id: string | null
-  sales: { status: string; created_at: string } | null
+  sales: {
+    status: string
+    created_at: string
+    sale_number: string
+    customers?: { first_name: string; last_name?: string; full_name?: string } | null
+  } | null
 }
 
 interface PurchaseRow {
@@ -68,6 +73,8 @@ export default function ReportesPage() {
   const [range, setRange]           = useState<DateRange>('30d')
   const [tab, setTab]               = useState<Tab>('bruta')
   const [hoveredProduct, setHoveredProduct] = useState<string | null>(null)
+  const [productSearch, setProductSearch]   = useState('')
+  const [selectedProduct, setSelectedProduct] = useState<string | null>(null) // normalized key
   // IDs de compras excluidas del cálculo neto (inversión inicial, etc.)
   const [excludedPurchaseIds, setExcludedPurchaseIds] = useState<Set<string>>(new Set())
 
@@ -88,7 +95,7 @@ export default function ReportesPage() {
       // 1. sale_items for gross margin calc
       const { data: saleData, error: saleErr } = await supabase
         .from('sale_items')
-        .select('quantity, purchase_price, total, product_name, product_id, sales!inner(status, created_at)')
+        .select('quantity, purchase_price, total, product_name, product_id, sales!inner(status, created_at, sale_number, customers(first_name, last_name, full_name))')
         .in('sales.status', ['completed', 'pending'])
 
       if (saleErr) console.error('sale_items:', saleErr)
@@ -247,6 +254,39 @@ export default function ReportesPage() {
   const topProducts = allProducts.slice(0, 15)
   const maxProfit = topProducts.length > 0 ? Math.max(...topProducts.map(p => Math.abs(p.profit))) : 1
 
+  // ─── Búsqueda de productos ───────────────────────────────────────────────────
+  const searchedProducts = useMemo(() => {
+    if (!productSearch.trim()) return allProducts
+    const q = normalize(productSearch)
+    return allProducts.filter(p => normalize(p.product_name).includes(q))
+  }, [allProducts, productSearch, normalize])
+
+  // Ventas individuales del producto seleccionado (para el panel de detalle)
+  const productSaleDetail = useMemo(() => {
+    if (!selectedProduct) return []
+    return filteredItems
+      .filter(r => normalize(r.product_name ?? '') === selectedProduct)
+      .map(r => {
+        const c = r.sales?.customers
+        const customerName = c
+          ? (c.full_name ?? `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || 'Cliente')
+          : null
+        return {
+          date: r.sales?.created_at ?? '',
+          sale_number: r.sales?.sale_number ?? '',
+          customer_name: customerName,
+          qty: Number(r.quantity) || 1,
+          unit_price: Number(r.total) / (Number(r.quantity) || 1),
+          purchase_price: Number(r.purchase_price) || 0,
+          revenue: Number(r.total) || 0,
+          cost: (Number(r.purchase_price) || 0) * (Number(r.quantity) || 1),
+          profit: (Number(r.total) || 0) - (Number(r.purchase_price) || 0) * (Number(r.quantity) || 1),
+          status: r.sales?.status ?? '',
+        }
+      })
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+  }, [selectedProduct, filteredItems, normalize])
+
   // ─── Expense by category ─────────────────────────────────────────────────────
   const expByCategory = useMemo(() => {
     const map = new Map<string, number>()
@@ -394,13 +434,38 @@ export default function ReportesPage() {
                   </div>
                 )}
 
-                {/* Detail table - ALL products */}
+                {/* Detail table - ALL products + search */}
                 {allProducts.length > 0 && (
                   <div className="bg-white rounded-xl border border-stone-200 overflow-hidden">
-                    <div className="px-5 py-4 border-b border-stone-100 flex items-center justify-between">
-                      <h2 className="text-sm font-semibold text-stone-800">Detalle por producto</h2>
-                      <span className="text-xs text-stone-400">{allProducts.length} productos</span>
+                    <div className="px-5 py-4 border-b border-stone-100 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h2 className="text-sm font-semibold text-stone-800">Detalle por producto</h2>
+                        <span className="text-xs text-stone-400">
+                          {searchedProducts.length !== allProducts.length
+                            ? `${searchedProducts.length} de ${allProducts.length}`
+                            : `${allProducts.length} productos`}
+                        </span>
+                      </div>
+                      {/* Search bar */}
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 text-sm">🔍</span>
+                        <input
+                          type="text"
+                          value={productSearch}
+                          onChange={e => { setProductSearch(e.target.value); setSelectedProduct(null) }}
+                          placeholder="Buscar producto…"
+                          className="w-full pl-9 pr-4 py-2 text-sm border border-stone-200 rounded-lg bg-stone-50 focus:outline-none focus:border-stone-400 focus:bg-white"
+                        />
+                        {productSearch && (
+                          <button
+                            onClick={() => { setProductSearch(''); setSelectedProduct(null) }}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 text-lg leading-none"
+                          >×</button>
+                        )}
+                      </div>
                     </div>
+
+                    {/* Product rows */}
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs">
                         <thead>
@@ -411,34 +476,96 @@ export default function ReportesPage() {
                             <th className="text-right px-4 py-2.5 font-medium text-stone-500">Costo</th>
                             <th className="text-right px-5 py-2.5 font-medium text-stone-500">Utilidad</th>
                             <th className="text-right px-5 py-2.5 font-medium text-stone-500">Margen</th>
+                            <th className="px-4 py-2.5" />
                           </tr>
                         </thead>
                         <tbody>
-                          {allProducts.map((p, i) => {
-                            const margin = p.revenue > 0 ? (p.profit / p.revenue) * 100 : 0
-                            const isNeg  = p.profit < 0
+                          {searchedProducts.map((p, i) => {
+                            const margin   = p.revenue > 0 ? (p.profit / p.revenue) * 100 : 0
+                            const isNeg    = p.profit < 0
+                            const normKey  = normalize(p.product_name)
+                            const isOpen   = selectedProduct === normKey
                             return (
-                              <tr key={p.product_name} className={`border-b border-stone-50 hover:bg-stone-50 transition-colors ${i % 2 ? 'bg-stone-50/40' : ''}`}>
-                                <td className="px-5 py-3 text-stone-800 font-medium max-w-[200px] truncate">{p.product_name}</td>
-                                <td className="px-4 py-3 text-right text-stone-600">{p.units.toLocaleString('es-CO')}</td>
-                                <td className="px-4 py-3 text-right text-stone-700">{fmt(p.revenue)}</td>
-                                <td className="px-4 py-3 text-right text-stone-500">{fmt(p.cost)}</td>
-                                <td className={`px-5 py-3 text-right font-semibold ${isNeg ? 'text-[#eb6834]' : 'text-[#1baf7a]'}`}>{fmt(p.profit)}</td>
-                                <td className={`px-5 py-3 text-right font-medium ${margin >= 30 ? 'text-[#1baf7a]' : margin >= 15 ? 'text-[#2a78d6]' : margin >= 0 ? 'text-[#eda100]' : 'text-[#eb6834]'}`}>{pct(margin)}</td>
-                              </tr>
+                              <>
+                                <tr
+                                  key={p.product_name}
+                                  className={`border-b border-stone-50 hover:bg-amber-50/40 cursor-pointer transition-colors ${
+                                    isOpen ? 'bg-amber-50 border-b-0' : i % 2 ? 'bg-stone-50/40' : ''
+                                  }`}
+                                  onClick={() => setSelectedProduct(isOpen ? null : normKey)}
+                                >
+                                  <td className="px-5 py-3 text-stone-800 font-medium max-w-[200px] truncate">{p.product_name}</td>
+                                  <td className="px-4 py-3 text-right text-stone-600">{p.units.toLocaleString('es-CO')}</td>
+                                  <td className="px-4 py-3 text-right text-stone-700">{fmt(p.revenue)}</td>
+                                  <td className="px-4 py-3 text-right text-stone-500">{fmt(p.cost)}</td>
+                                  <td className={`px-5 py-3 text-right font-semibold ${isNeg ? 'text-[#eb6834]' : 'text-[#1baf7a]'}`}>{fmt(p.profit)}</td>
+                                  <td className={`px-5 py-3 text-right font-medium ${margin >= 30 ? 'text-[#1baf7a]' : margin >= 15 ? 'text-[#2a78d6]' : margin >= 0 ? 'text-[#eda100]' : 'text-[#eb6834]'}`}>{pct(margin)}</td>
+                                  <td className="px-4 py-3 text-stone-400 text-right">{isOpen ? '▲' : '▼'}</td>
+                                </tr>
+
+                                {/* Expanded: individual sale transactions */}
+                                {isOpen && (
+                                  <tr key={`${p.product_name}-detail`} className="bg-amber-50">
+                                    <td colSpan={7} className="px-5 pb-4 pt-1">
+                                      <p className="text-[11px] font-semibold text-stone-500 uppercase tracking-wide mb-2">
+                                        Ventas individuales · {productSaleDetail.length} transacciones
+                                      </p>
+                                      <div className="rounded-lg border border-amber-200 overflow-hidden">
+                                        <table className="w-full text-[11px]">
+                                          <thead>
+                                            <tr className="bg-amber-100 border-b border-amber-200">
+                                              <th className="text-left px-3 py-1.5 font-medium text-stone-500"># Venta</th>
+                                              <th className="text-left px-3 py-1.5 font-medium text-stone-500">Fecha</th>
+                                              <th className="text-left px-3 py-1.5 font-medium text-stone-500">Cliente</th>
+                                              <th className="text-right px-3 py-1.5 font-medium text-stone-500">Cant</th>
+                                              <th className="text-right px-3 py-1.5 font-medium text-stone-500">P. venta</th>
+                                              <th className="text-right px-3 py-1.5 font-medium text-stone-500">Utilidad</th>
+                                              <th className="text-left px-3 py-1.5 font-medium text-stone-500">Estado</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody>
+                                            {productSaleDetail.map((s, j) => (
+                                              <tr key={j} className={`border-b border-amber-100 ${j % 2 ? 'bg-amber-50/60' : 'bg-white'}`}>
+                                                <td className="px-3 py-1.5 font-mono text-stone-500">{s.sale_number || '—'}</td>
+                                                <td className="px-3 py-1.5 text-stone-600">
+                                                  {new Date(s.date).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: '2-digit' })}
+                                                </td>
+                                                <td className="px-3 py-1.5 text-stone-600 max-w-[120px] truncate">
+                                                  {s.customer_name ?? <span className="text-stone-300 italic">Sin cliente</span>}
+                                                </td>
+                                                <td className="px-3 py-1.5 text-right text-stone-700 font-medium">{s.qty}</td>
+                                                <td className="px-3 py-1.5 text-right text-stone-700">{fmt(s.unit_price)}</td>
+                                                <td className={`px-3 py-1.5 text-right font-semibold ${s.profit < 0 ? 'text-[#eb6834]' : 'text-[#1baf7a]'}`}>{fmt(s.profit)}</td>
+                                                <td className="px-3 py-1.5">
+                                                  {s.status === 'pending'
+                                                    ? <span className="bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded text-[10px] font-medium">Fiado</span>
+                                                    : <span className="bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded text-[10px] font-medium">Cobrado</span>}
+                                                </td>
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </>
                             )
                           })}
                         </tbody>
-                        <tfoot>
-                          <tr className="border-t-2 border-stone-200 bg-stone-50 font-semibold">
-                            <td className="px-5 py-3 text-stone-800">Total</td>
-                            <td className="px-4 py-3 text-right text-stone-700">{totalUnits.toLocaleString('es-CO')}</td>
-                            <td className="px-4 py-3 text-right text-stone-700">{fmt(totalRevenue)}</td>
-                            <td className="px-4 py-3 text-right text-stone-700">{fmt(totalCogs)}</td>
-                            <td className={`px-5 py-3 text-right ${grossProfit >= 0 ? 'text-[#1baf7a]' : 'text-[#eb6834]'}`}>{fmt(grossProfit)}</td>
-                            <td className={`px-5 py-3 text-right ${grossMargin >= 15 ? 'text-[#1baf7a]' : 'text-[#eb6834]'}`}>{pct(grossMargin)}</td>
-                          </tr>
-                        </tfoot>
+                        {!productSearch && (
+                          <tfoot>
+                            <tr className="border-t-2 border-stone-200 bg-stone-50 font-semibold">
+                              <td className="px-5 py-3 text-stone-800">Total</td>
+                              <td className="px-4 py-3 text-right text-stone-700">{totalUnits.toLocaleString('es-CO')}</td>
+                              <td className="px-4 py-3 text-right text-stone-700">{fmt(totalRevenue)}</td>
+                              <td className="px-4 py-3 text-right text-stone-700">{fmt(totalCogs)}</td>
+                              <td className={`px-5 py-3 text-right ${grossProfit >= 0 ? 'text-[#1baf7a]' : 'text-[#eb6834]'}`}>{fmt(grossProfit)}</td>
+                              <td className={`px-5 py-3 text-right ${grossMargin >= 15 ? 'text-[#1baf7a]' : 'text-[#eb6834]'}`}>{pct(grossMargin)}</td>
+                              <td />
+                            </tr>
+                          </tfoot>
+                        )}
                       </table>
                     </div>
                   </div>
