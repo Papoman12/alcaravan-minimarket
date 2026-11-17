@@ -269,7 +269,7 @@ export default function ReportesPage() {
       .map(r => {
         const c = r.sales?.customers
         const customerName = c
-          ? (c.full_name ?? `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || 'Cliente')
+          ? (c.full_name ?? (`${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || 'Cliente'))
           : null
         return {
           date: r.sales?.created_at ?? '',
