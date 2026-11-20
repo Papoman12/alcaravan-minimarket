@@ -20,6 +20,7 @@ const navItems: NavItem[] = [
   { href: '/clientes',     icon: '👥', label: 'Clientes' },
   { href: '/productos',    icon: '📦', label: 'Productos' },
   { href: '/inventario',   icon: '📊', label: 'Inventario' },
+  { href: '/movimientos',  icon: '🔄', label: 'Movimientos' },
   { href: '/compras',      icon: '🧾', label: 'Compras' },
   { href: '/proveedores',  icon: '🏭', label: 'Proveedores' },
   { href: '/cafeteria',    icon: '☕', label: 'Cafetería',   phase: 3 },
