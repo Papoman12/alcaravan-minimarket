@@ -470,6 +470,8 @@ interface CashSession {
   expected_cash: number | null
   difference: number | null
   notes: string | null
+  opened_by: string | null
+  closed_by: string | null
   status: 'open' | 'closed'
 }
 
@@ -520,16 +522,17 @@ function AbrirCajaModal({
   onConfirm,
   onClose,
 }: {
-  onConfirm: (amount: number) => Promise<void>
+  onConfirm: (amount: number, cashierName: string) => Promise<void>
   onClose: () => void
 }) {
   const [amount, setAmount] = useState('')
+  const [cashierName, setCashierName] = useState('')
   const [loading, setLoading] = useState(false)
   const today = getColombiaDate()
 
   async function handleSubmit() {
     setLoading(true)
-    await onConfirm(parseFloat(amount) || 0)
+    await onConfirm(parseFloat(amount) || 0, cashierName.trim())
     setLoading(false)
   }
 
@@ -549,6 +552,19 @@ function AbrirCajaModal({
         <div className="p-6 space-y-4">
           <div>
             <label className="block text-sm font-medium text-stone-700 mb-1">
+              Nombre del cajero
+            </label>
+            <input
+              type="text"
+              value={cashierName}
+              onChange={(e) => setCashierName(e.target.value)}
+              placeholder="Ej: María, Juan..."
+              autoFocus
+              className="w-full px-4 py-3 rounded-xl border border-stone-200 text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-700"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-stone-700 mb-1">
               Efectivo inicial en caja
             </label>
             <input
@@ -557,7 +573,6 @@ function AbrirCajaModal({
               onChange={(e) => setAmount(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
               placeholder="0"
-              autoFocus
               className="w-full px-4 py-3 rounded-xl border border-stone-200 text-right text-xl font-bold text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-700"
             />
             <p className="text-xs text-stone-400 mt-1">
@@ -596,12 +611,13 @@ function CerrarCajaModal({
 }: {
   session: CashSession
   summary: DailySummary
-  onConfirm: (closingAmount: number, notes: string) => Promise<void>
+  onConfirm: (closingAmount: number, notes: string, closedBy: string) => Promise<void>
   onClose: () => void
 }) {
   const expectedCash = session.opening_amount + summary.cash_sales
   const [closingAmount, setClosingAmount] = useState(String(expectedCash))
   const [notes, setNotes] = useState('')
+  const [closedBy, setClosedBy] = useState(session.opened_by ?? '')
   const [loading, setLoading] = useState(false)
 
   const actual = parseFloat(closingAmount) || 0
@@ -609,7 +625,7 @@ function CerrarCajaModal({
 
   async function handleSubmit() {
     setLoading(true)
-    await onConfirm(actual, notes)
+    await onConfirm(actual, notes, closedBy.trim())
     setLoading(false)
   }
 
@@ -716,6 +732,20 @@ function CerrarCajaModal({
               </p>
             </div>
           )}
+
+          {/* Cajero que cierra */}
+          <div>
+            <label className="block text-sm font-medium text-stone-700 mb-1">
+              Cajero que cierra
+            </label>
+            <input
+              type="text"
+              value={closedBy}
+              onChange={(e) => setClosedBy(e.target.value)}
+              placeholder="Nombre de quien cierra"
+              className="w-full px-3 py-2.5 rounded-xl border border-stone-200 text-stone-700 focus:outline-none focus:ring-2 focus:ring-amber-700"
+            />
+          </div>
 
           {/* Notas */}
           <div>
@@ -971,12 +1001,13 @@ export default function CajaPage() {
   }, [loadData])
 
   // ── Abrir caja ─────────────────────────────────────────────────────────────
-  async function handleAbrirCaja(openingAmount: number) {
+  async function handleAbrirCaja(openingAmount: number, cashierName: string) {
     const { data, error } = await supabase
       .from('cash_sessions')
       .insert({
         date: colombiaToday,
         opening_amount: openingAmount,
+        opened_by: cashierName || null,
         status: 'open',
       })
       .select()
@@ -1018,7 +1049,7 @@ export default function CajaPage() {
   }
 
   // ── Cerrar caja ────────────────────────────────────────────────────────────
-  async function handleCerrarCaja(closingAmount: number, notes: string) {
+  async function handleCerrarCaja(closingAmount: number, notes: string, closedBy: string) {
     if (!session) return
     const expectedCash =
       session.opening_amount + summary.cash_sales
@@ -1033,6 +1064,7 @@ export default function CajaPage() {
         expected_cash: expectedCash,
         difference,
         notes: notes || null,
+        closed_by: closedBy || null,
         status: 'closed',
       })
       .eq('id', session.id)
@@ -1168,6 +1200,9 @@ CREATE POLICY "Authenticated users can manage cash_sessions"
               <p className="text-xs text-stone-500">
                 {formatColombiaTime(session.opened_at)}
               </p>
+              {session.opened_by && (
+                <p className="text-xs text-amber-700 font-medium mt-0.5">👤 {session.opened_by}</p>
+              )}
             </div>
             {session.status === 'closed' && session.closed_at && (
               <div className="text-right">
@@ -1178,6 +1213,9 @@ CREATE POLICY "Authenticated users can manage cash_sessions"
                 <p className="text-xs text-stone-500">
                   {formatColombiaTime(session.closed_at)}
                 </p>
+                {session.closed_by && (
+                  <p className="text-xs text-red-700 font-medium mt-0.5">👤 {session.closed_by}</p>
+                )}
               </div>
             )}
           </div>
@@ -1538,6 +1576,14 @@ CREATE POLICY "Authenticated users can manage cash_sessions"
                         <span>🔓 Abre: <span className="font-medium text-stone-700">{formatCurrency(s.opening_amount)}</span></span>
                         {s.closing_amount !== null && (
                           <span>🔒 Cierra: <span className="font-medium text-stone-700">{formatCurrency(s.closing_amount)}</span></span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 mt-0.5 text-xs text-stone-400 flex-wrap">
+                        {s.opened_by && (
+                          <span>👤 Abrió: <span className="font-medium text-amber-700">{s.opened_by}</span></span>
+                        )}
+                        {s.closed_by && (
+                          <span>👤 Cerró: <span className="font-medium text-red-600">{s.closed_by}</span></span>
                         )}
                       </div>
                       {s.notes && (
