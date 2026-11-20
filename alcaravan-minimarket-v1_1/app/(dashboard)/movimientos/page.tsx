@@ -25,6 +25,11 @@ interface Product {
   min_stock: number | null
 }
 
+interface SaleItem {
+  product_id: string | null
+  quantity: number
+}
+
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
 const TYPE_LABEL: Record<string, string> = {
@@ -175,9 +180,10 @@ function NuevoMovimientoModal({
 // ─── Página principal ─────────────────────────────────────────────────────────
 
 export default function MovimientosPage() {
-  const [products, setProducts]   = useState<Product[]>([])
-  const [movements, setMovements] = useState<Movement[]>([])
-  const [loading, setLoading]     = useState(true)
+  const [products, setProducts]     = useState<Product[]>([])
+  const [movements, setMovements]   = useState<Movement[]>([])
+  const [saleItems, setSaleItems]   = useState<SaleItem[]>([])
+  const [loading, setLoading]       = useState(true)
   const [tableError, setTableError] = useState(false)
 
   // Filtros
@@ -192,15 +198,25 @@ export default function MovimientosPage() {
 
   // Tab
   const [tab, setTab] = useState<'resumen' | 'movimientos'>('resumen')
+  const [searchProduct, setSearchProduct] = useState('')
 
   // ── Carga de datos ────────────────────────────────────────────────────────
   async function loadData() {
     setLoading(true)
     const supabase = createClient()
 
-    const [{ data: prods }, { data: movs, error }] = await Promise.all([
+    const [
+      { data: prods },
+      { data: movs, error },
+      { data: items },
+    ] = await Promise.all([
       supabase.from('products').select('id, name, stock, min_stock').eq('is_active', true).order('name'),
       supabase.from('inventory_movements').select('*').order('created_at', { ascending: false }),
+      // Total de unidades vendidas por producto (ventas completadas)
+      supabase
+        .from('sale_items')
+        .select('product_id, quantity, sales!inner(status)')
+        .eq('sales.status', 'completed'),
     ])
 
     if (error) {
@@ -211,6 +227,7 @@ export default function MovimientosPage() {
 
     setProducts(prods ?? [])
     setMovements(movs ?? [])
+    setSaleItems((items ?? []).map((i: any) => ({ product_id: i.product_id, quantity: i.quantity })))
     setLoading(false)
   }
 
@@ -233,12 +250,14 @@ export default function MovimientosPage() {
 
   // ── Resumen por producto (todos los movimientos, sin filtro de fecha) ─────
   const summaries = products.map(product => {
-    const movs = movements.filter(m => m.product_id === product.id)
-    const entradas = movs.filter(m => IS_ENTRY[m.movement_type]).reduce((s, m) => s + m.quantity, 0)
+    const movs     = movements.filter(m => m.product_id === product.id)
+    const entradas = movs.filter(m =>  IS_ENTRY[m.movement_type]).reduce((s, m) => s + m.quantity, 0)
     const salidas  = movs.filter(m => !IS_ENTRY[m.movement_type]).reduce((s, m) => s + m.quantity, 0)
-    // Inventario inicial = lo que hay hoy + lo que salió - lo que entró (movimientos registrados)
-    const inicial = product.stock + salidas - entradas
-    return { product, entradas, salidas, inicial }
+    // Unidades vendidas en el POS para este producto
+    const vendido  = saleItems.filter(i => i.product_id === product.id).reduce((s, i) => s + i.quantity, 0)
+    // Inventario inicial = stock actual + todo lo que salió (ventas + ajustes) - todo lo que entró (compras + ajustes)
+    const inicial  = product.stock + vendido + salidas - entradas
+    return { product, entradas, salidas, vendido, inicial }
   })
 
   // ── Error: tabla no existe ─────────────────────────────────────────────────
@@ -306,23 +325,49 @@ CREATE POLICY "auth_all" ON inventory_movements FOR ALL TO authenticated USING (
             <p className="text-stone-500">No hay productos activos</p>
           </div>
         ) : (
+          <>
+            {/* Buscador */}
+            <div className="relative mb-3">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 text-sm">🔍</span>
+              <input
+                type="text"
+                value={searchProduct}
+                onChange={e => setSearchProduct(e.target.value)}
+                placeholder="Buscar producto..."
+                className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-stone-200 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700"
+              />
+              {searchProduct && (
+                <button onClick={() => setSearchProduct('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 text-lg leading-none">
+                  ×
+                </button>
+              )}
+            </div>
+          <div className="bg-white border border-stone-200 rounded-2xl p-10 text-center">
+            <p className="text-4xl mb-3">📦</p>
+            <p className="text-stone-500">No hay productos activos</p>
+          </div>
           <div className="bg-white border border-stone-200 rounded-2xl overflow-hidden">
             {/* Cabecera */}
             <div className="grid grid-cols-12 gap-2 px-4 py-2.5 bg-stone-50 border-b border-stone-200 text-xs font-semibold text-stone-500 uppercase tracking-wide">
-              <div className="col-span-4">Producto</div>
+              <div className="col-span-3">Producto</div>
               <div className="col-span-2 text-right text-blue-600">Inv. inicial</div>
-              <div className="col-span-2 text-right text-emerald-600">+ Entradas</div>
-              <div className="col-span-2 text-right text-orange-500">- Salidas</div>
+              <div className="col-span-2 text-right text-emerald-600">+ Compras</div>
+              <div className="col-span-2 text-right text-red-500">- Vendido</div>
+              <div className="col-span-2 text-right text-orange-500">- Ajustes</div>
               <div className="col-span-1 text-right">Actual</div>
-              <div className="col-span-1"></div>
             </div>
             {/* Filas */}
             <div className="divide-y divide-stone-50">
-              {summaries.map(({ product, entradas, salidas, inicial }) => {
+              {summaries
+                .filter(({ product }) =>
+                  !searchProduct || product.name.toLowerCase().includes(searchProduct.toLowerCase())
+                )
+                .map(({ product, entradas, salidas, vendido, inicial }) => {
                 const bajo = product.min_stock != null && product.stock <= product.min_stock
                 return (
                   <div key={product.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center hover:bg-stone-50">
-                    <div className="col-span-4">
+                    <div className="col-span-3">
                       <p className="font-medium text-stone-800 text-sm">{product.name}</p>
                       {bajo && <span className="text-[10px] text-red-600 font-semibold">⚠️ Stock bajo</span>}
                     </div>
@@ -335,19 +380,22 @@ CREATE POLICY "auth_all" ON inventory_movements FOR ALL TO authenticated USING (
                       </span>
                     </div>
                     <div className="col-span-2 text-right">
+                      <span className={`text-sm font-semibold ${vendido > 0 ? 'text-red-600' : 'text-stone-300'}`}>
+                        -{vendido.toLocaleString('es-CO')}
+                      </span>
+                    </div>
+                    <div className="col-span-2 text-right">
                       <span className={`text-sm font-semibold ${salidas > 0 ? 'text-orange-600' : 'text-stone-300'}`}>
                         -{salidas.toLocaleString('es-CO')}
                       </span>
                     </div>
-                    <div className="col-span-1 text-right">
+                    <div className="col-span-1 text-right flex items-center justify-end gap-1">
                       <span className={`text-sm font-bold ${bajo ? 'text-red-600' : 'text-stone-800'}`}>
                         {product.stock.toLocaleString('es-CO')}
                       </span>
-                    </div>
-                    <div className="col-span-1 flex justify-end">
                       <button
                         onClick={() => { setModalProductId(product.id); setShowModal(true) }}
-                        className="text-xs bg-amber-100 text-amber-700 hover:bg-amber-200 px-2 py-1 rounded-lg font-semibold"
+                        className="text-xs bg-amber-100 text-amber-700 hover:bg-amber-200 px-1.5 py-0.5 rounded-md font-bold ml-1"
                         title="Registrar entrada">
                         +
                       </button>
@@ -357,6 +405,7 @@ CREATE POLICY "auth_all" ON inventory_movements FOR ALL TO authenticated USING (
               })}
             </div>
           </div>
+          </>
         )
       )}
 
