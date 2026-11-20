@@ -464,31 +464,41 @@ ALTER TABLE cash_sessions
       ) : (
         <div className="bg-white border border-stone-200 rounded-2xl overflow-hidden">
           <div className="divide-y divide-stone-50">
-            {movements.map((m) => (
-              <div key={m.id} className="px-4 py-3 hover:bg-stone-50 transition-colors">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-medium text-stone-800 text-sm">{m.product_name}</p>
-                      <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${TYPE_COLOR[m.movement_type]}`}>
-                        {TYPE_LABEL[m.movement_type]}
-                      </span>
+            {movements.map((m) => {
+              // Nombre: usar product_name del registro; si está vacío, buscar en la lista de productos
+              const displayName = m.product_name?.trim()
+                || products.find(p => p.id === m.product_id)?.name
+                || '—'
+              // Tipo: si no coincide con ninguno conocido, mostrar genérico
+              const typeLabel = TYPE_LABEL[m.movement_type] ?? m.movement_type ?? 'Movimiento'
+              const typeColor = TYPE_COLOR[m.movement_type] ?? 'bg-stone-100 text-stone-600'
+              const isEntry = IS_ENTRY[m.movement_type] ?? false
+              return (
+                <div key={m.id} className="px-4 py-3 hover:bg-stone-50 transition-colors">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-medium text-stone-800 text-sm">{displayName}</p>
+                        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${typeColor}`}>
+                          {typeLabel}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 mt-0.5 text-xs text-stone-400 flex-wrap">
+                        <span>{formatDate(m.created_at)}</span>
+                        {m.created_by && <span>👤 {m.created_by}</span>}
+                        {m.notes && <span className="italic">"{m.notes}"</span>}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-3 mt-0.5 text-xs text-stone-400 flex-wrap">
-                      <span>{formatDate(m.created_at)}</span>
-                      {m.created_by && <span>👤 {m.created_by}</span>}
-                      {m.notes && <span className="italic">"{m.notes}"</span>}
+                    <div className="text-right flex-shrink-0">
+                      <p className={`text-lg font-bold ${isEntry ? 'text-emerald-700' : 'text-red-600'}`}>
+                        {isEntry ? '+' : '-'}{m.quantity.toLocaleString('es-CO')}
+                      </p>
+                      <p className="text-xs text-stone-400">unidades</p>
                     </div>
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <p className={`text-lg font-bold ${IS_ENTRY[m.movement_type] ? 'text-emerald-700' : 'text-red-600'}`}>
-                      {IS_ENTRY[m.movement_type] ? '+' : '-'}{m.quantity.toLocaleString('es-CO')}
-                    </p>
-                    <p className="text-xs text-stone-400">unidades</p>
                   </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}
