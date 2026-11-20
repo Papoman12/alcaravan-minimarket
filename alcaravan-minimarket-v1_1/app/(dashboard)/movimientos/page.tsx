@@ -306,10 +306,11 @@ function ResumenView({
     <div className="bg-white border border-stone-200 rounded-2xl overflow-hidden">
       {/* Encabezado tabla */}
       <div className="grid grid-cols-12 gap-2 px-4 py-2 bg-stone-50 border-b border-stone-100 text-xs font-semibold text-stone-500 uppercase tracking-wide">
-        <div className="col-span-5">Producto</div>
-        <div className="col-span-2 text-right">Inv. inicial</div>
+        <div className="col-span-4">Producto</div>
+        <div className="col-span-2 text-right text-blue-600">Inv. inicial</div>
         <div className="col-span-2 text-right text-emerald-600">+ Entradas</div>
-        <div className="col-span-2 text-right text-stone-500">Stock actual</div>
+        <div className="col-span-2 text-right text-orange-500">- Salidas</div>
+        <div className="col-span-1 text-right">Actual</div>
         <div className="col-span-1"></div>
       </div>
 
@@ -328,12 +329,13 @@ function ResumenView({
                 className="grid grid-cols-12 gap-2 px-4 py-3 items-center hover:bg-stone-50 cursor-pointer"
                 onClick={() => setExpanded(isOpen ? null : product.id)}
               >
-                <div className="col-span-5">
+                <div className="col-span-4">
                   <p className="font-medium text-stone-800 text-sm">{product.name}</p>
                   {stockBajo && (
                     <span className="text-[10px] text-red-600 font-semibold">⚠️ Stock bajo</span>
                   )}
                 </div>
+                {/* Inv. inicial = stock actual + salidas acumuladas - entradas acumuladas */}
                 <div className="col-span-2 text-right">
                   <span className="text-sm font-semibold text-blue-700">{inventarioInicial.toLocaleString('es-CO')}</span>
                   {product.unit && <span className="text-xs text-stone-400 ml-1">{product.unit}</span>}
@@ -344,11 +346,16 @@ function ResumenView({
                   </span>
                 </div>
                 <div className="col-span-2 text-right">
+                  <span className={`text-sm font-semibold ${totalSalidas > 0 ? 'text-orange-600' : 'text-stone-400'}`}>
+                    -{totalSalidas.toLocaleString('es-CO')}
+                  </span>
+                </div>
+                <div className="col-span-1 text-right">
                   <span className={`text-sm font-bold ${stockBajo ? 'text-red-600' : 'text-stone-800'}`}>
                     {product.stock.toLocaleString('es-CO')}
                   </span>
                 </div>
-                <div className="col-span-1 flex justify-end gap-1">
+                <div className="col-span-1 flex justify-end">
                   <button
                     onClick={e => { e.stopPropagation(); onAdd(product.id) }}
                     className="text-xs bg-amber-100 text-amber-700 hover:bg-amber-200 px-2 py-1 rounded-lg font-semibold"
@@ -461,34 +468,30 @@ export default function MovimientosPage() {
   const supabase = createClient()
 
   const [tab, setTab] = useState<'resumen' | 'historial'>('resumen')
-  const [movements, setMovements] = useState<Movement[]>([])
+  const [allMovements, setAllMovements] = useState<Movement[]>([])   // todos, sin filtro de fecha
+  const [filteredMovements, setFilteredMovements] = useState<Movement[]>([]) // solo para historial
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [tableError, setTableError] = useState(false)
-  const [period, setPeriod] = useState<Period>('all')
+  const [period, setPeriod] = useState<Period>('30d')
   const [showModal, setShowModal] = useState(false)
   const [modalProductId, setModalProductId] = useState<string | undefined>()
 
+  // Carga inicial: productos + TODOS los movimientos (para el resumen siempre completo)
   const loadAll = useCallback(async () => {
     setLoading(true)
 
-    // Cargar productos
-    const { data: prods } = await supabase
-      .from('products')
-      .select('id, name, stock, min_stock, unit')
-      .eq('is_active', true)
-      .order('name')
-    setProducts(prods ?? [])
-
-    // Cargar movimientos
-    const from = getFromDate(period)
-    let q = supabase
-      .from('inventory_movements')
-      .select('*')
-      .order('created_at', { ascending: false })
-    if (from) q = q.gte('created_at', from)
-
-    const { data, error } = await q
+    const [{ data: prods }, { data: allMovs, error }] = await Promise.all([
+      supabase
+        .from('products')
+        .select('id, name, stock, min_stock, unit')
+        .eq('is_active', true)
+        .order('name'),
+      supabase
+        .from('inventory_movements')
+        .select('*')
+        .order('created_at', { ascending: false }),
+    ])
 
     if (error) {
       if (error.code === '42P01') setTableError(true)
@@ -496,9 +499,21 @@ export default function MovimientosPage() {
       return
     }
 
-    setMovements(data ?? [])
+    setProducts(prods ?? [])
+    setAllMovements(allMovs ?? [])
     setLoading(false)
-  }, [period])
+  }, [])
+
+  // Filtrar movimientos para el historial según el período
+  useEffect(() => {
+    const from = getFromDate(period)
+    if (!from) {
+      setFilteredMovements(allMovements)
+    } else {
+      const fromDate = new Date(from)
+      setFilteredMovements(allMovements.filter(m => new Date(m.created_at) >= fromDate))
+    }
+  }, [period, allMovements])
 
   useEffect(() => { loadAll() }, [loadAll])
 
@@ -507,9 +522,9 @@ export default function MovimientosPage() {
     setShowModal(true)
   }
 
-  // Construir resumen por producto
+  // Resumen por producto — usa TODOS los movimientos (sin filtro de fecha)
   const summaries: ProductSummary[] = products.map(product => {
-    const prodMovements = movements.filter(m => m.product_id === product.id)
+    const prodMovements = allMovements.filter(m => m.product_id === product.id)
     const totalEntradas = prodMovements
       .filter(m => IS_ENTRY[m.movement_type])
       .reduce((s, m) => s + m.quantity, 0)
@@ -519,9 +534,9 @@ export default function MovimientosPage() {
     return { product, totalEntradas, totalSalidas, movements: prodMovements }
   })
 
-  // KPIs
-  const totalEntradas = movements.filter(m => IS_ENTRY[m.movement_type]).reduce((s, m) => s + m.quantity, 0)
-  const totalSalidas  = movements.filter(m => !IS_ENTRY[m.movement_type]).reduce((s, m) => s + m.quantity, 0)
+  // KPIs — también sobre todos los movimientos
+  const totalEntradas = allMovements.filter(m => IS_ENTRY[m.movement_type]).reduce((s, m) => s + m.quantity, 0)
+  const totalSalidas  = allMovements.filter(m => !IS_ENTRY[m.movement_type]).reduce((s, m) => s + m.quantity, 0)
 
   if (tableError) {
     return (
@@ -631,7 +646,7 @@ CREATE POLICY "Authenticated users can manage inventory_movements"
       ) : tab === 'resumen' ? (
         <ResumenView summaries={summaries} onAdd={openModal} />
       ) : (
-        <HistorialView movements={movements} products={products} />
+        <HistorialView movements={filteredMovements} products={products} />
       )}
 
       {/* ── Modal ───────────────────────────────────────────────────────────── */}
