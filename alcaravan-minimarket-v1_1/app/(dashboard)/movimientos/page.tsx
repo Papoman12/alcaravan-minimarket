@@ -157,25 +157,19 @@ function NuevoMovimientoModal({
 
     if (err) { setError(err.message); setSaving(false); return }
 
-    // Actualizar stock del producto
+    // Actualizar stock del producto directamente
     const delta = IS_ENTRY[form.movement_type] ? qty : -qty
-    await supabase.rpc('increment_stock', { p_id: form.product_id, delta })
-      .catch(() => {
-        // Si no existe la función RPC, actualizar manualmente
-        supabase
-          .from('products')
-          .select('stock')
-          .eq('id', form.product_id)
-          .single()
-          .then(({ data }) => {
-            if (data) {
-              supabase
-                .from('products')
-                .update({ stock: Math.max(0, (data.stock ?? 0) + delta) })
-                .eq('id', form.product_id)
-            }
-          })
-      })
+    const { data: prodData } = await supabase
+      .from('products')
+      .select('stock')
+      .eq('id', form.product_id)
+      .single()
+    if (prodData) {
+      await supabase
+        .from('products')
+        .update({ stock: Math.max(0, (prodData.stock ?? 0) + delta) })
+        .eq('id', form.product_id)
+    }
 
     setSaving(false)
     onSave()
