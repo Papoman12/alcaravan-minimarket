@@ -80,13 +80,16 @@ export default function MovimientosPage() {
       const purchaseIds = [...new Set(rawItems.map((i: any) => i.purchase_id).filter(Boolean))]
       const { data: purchases, error: e3 } = await supabase
         .from('purchases')
-        .select('id, date, supplier_name')
+        .select('id, created_at, supplier:suppliers(name)')
         .in('id', purchaseIds)
       if (e3) errs.push('purchases: ' + e3.message)
 
       const purchaseMap: Record<string, { date: string; supplier_name: string | null }> = {}
-      for (const p of purchases ?? []) {
-        purchaseMap[p.id] = { date: p.date, supplier_name: p.supplier_name ?? null }
+      for (const p of (purchases ?? []) as any[]) {
+        purchaseMap[p.id] = {
+          date: p.created_at,
+          supplier_name: p.supplier?.name ?? null,
+        }
       }
 
       enrichedItems = rawItems.map((i: any) => ({
