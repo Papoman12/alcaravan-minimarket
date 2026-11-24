@@ -141,6 +141,7 @@ function NuevaCompraModal({
         quantity: i.quantity,
         unit_cost: i.unit_cost,
         subtotal: i.quantity * i.unit_cost,
+        total: i.quantity * i.unit_cost,
       }))
 
       const { error: itemsError } = await supabase.from('purchase_items').insert(purchaseLines)
@@ -594,6 +595,7 @@ function DetalleCompraModal({
         quantity: qty,
         unit_cost: cost,
         subtotal: qty * cost,
+        total: qty * cost,
       })
       .select('id, product_name, quantity, unit_cost')
       .single()
