@@ -146,6 +146,11 @@ function NuevaCompraModal({
       const { error: itemsError } = await supabase.from('purchase_items').insert(purchaseLines)
       if (itemsError) {
         console.error('Error guardando detalle de compra:', itemsError)
+        // La compra cabecera se creó — mostrar error claro y refrescar la lista
+        setError(`⚠️ La compra ${purchaseNumber} fue registrada pero los productos no se guardaron: ${itemsError.message}. Ábrela con el botón 👁 y agrega los productos manualmente.`)
+        setSaving(false)
+        onSaved() // refresca la lista para que aparezca la compra
+        return
       }
 
       // 3. Actualizar stock de cada producto
